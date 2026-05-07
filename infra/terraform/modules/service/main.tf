@@ -3,7 +3,7 @@ locals {
     GITHUB_WEBHOOK_SECRET    = var.github_webhook_secret
     GITHUB_TOKEN             = var.github_token
     EVALUATIONS_TABLE_NAME   = var.evaluations_table_name
-    RAW_EVENT_BUCKET_NAME    = coalesce(var.raw_event_bucket_name, "")
+    RAW_EVENT_BUCKET_NAME    = var.raw_event_bucket_name != null ? var.raw_event_bucket_name : ""
     ENABLE_RAW_EVENT_ARCHIVE = tostring(var.enable_raw_event_archive)
     REQUIRED_LABELS          = var.required_labels
     EVALUATION_REPOSITORY    = var.evaluation_repository
