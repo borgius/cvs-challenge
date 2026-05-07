@@ -10,12 +10,10 @@ import { fetchPullRequestFiles } from './github/client.ts';
 import { isValidGitHubSignature } from './github/signature.ts';
 import { evaluatePullRequest } from './services/evaluatePullRequest.ts';
 import { ConsoleEvaluationRepository } from './storage/evaluationRepository.ts';
-import {
-  supportedPullRequestActions,
-  type PullRequestLabel,
-  type PullRequestPayload,
-  type SupportedPullRequestAction,
-} from './types/github.ts';
+import { supportedPullRequestActions } from './types/github.ts';
+import { isPullRequestPayload, isSupportedPullRequestAction } from './utils/guards.ts';
+import { accessLogger } from './utils/logger.ts';
+import { buildRawEventKey } from './utils/storageKeys.ts';
 
 type AppBindings = {
   event: LambdaEvent | undefined;
@@ -27,65 +25,6 @@ type AppEnv = {
   Variables: RequestIdVariables;
 };
 
-const accessLogger = (message: string, ...details: string[]): void => {
-  console.log(
-    JSON.stringify({
-      timestamp: new Date().toISOString(),
-      level: 'INFO',
-      logger: 'hono',
-      message,
-      details,
-    }),
-  );
-};
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null;
-
-const isPullRequestLabelArray = (value: unknown): value is PullRequestLabel[] =>
-  Array.isArray(value) && value.every((item) => isRecord(item) && typeof item.name === 'string');
-
-const isPullRequestPayload = (value: unknown): value is PullRequestPayload => {
-  if (!isRecord(value)) {
-    return false;
-  }
-
-  const repository = value.repository;
-  const pullRequest = value.pull_request;
-
-  if (!isRecord(repository) || !isRecord(pullRequest)) {
-    return false;
-  }
-
-  const head = pullRequest.head;
-  const base = pullRequest.base;
-  const labels = pullRequest.labels;
-
-  return (
-    typeof value.action === 'string' &&
-    typeof repository.full_name === 'string' &&
-    isRecord(head) &&
-    typeof head.ref === 'string' &&
-    (head.sha === undefined || typeof head.sha === 'string') &&
-    isRecord(base) &&
-    typeof base.ref === 'string' &&
-    (labels === undefined || isPullRequestLabelArray(labels))
-  );
-};
-
-const isSupportedPullRequestAction = (
-  action: string,
-): action is SupportedPullRequestAction =>
-  supportedPullRequestActions.some((supportedAction) => supportedAction === action);
-
-const buildRawEventKey = (
-  repositoryFullName: string,
-  pullNumber: number,
-  githubDeliveryId: string | undefined,
-): string => {
-  const safeRepositoryName = repositoryFullName.replace('/', '__');
-  return `github/${safeRepositoryName}/${pullNumber}/${githubDeliveryId ?? Date.now().toString()}.json`;
-};
 
 export const app = new Hono<AppEnv>();
 
