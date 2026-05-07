@@ -6,8 +6,8 @@ module "http_api" {
   description   = var.description
   protocol_type = "HTTP"
 
-  create_domain_name            = false
-  disable_execute_api_endpoint  = false
+  create_domain_name           = false
+  disable_execute_api_endpoint = false
 
   create_stage = true
   stage_name   = var.stage_name
