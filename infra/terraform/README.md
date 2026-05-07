@@ -52,5 +52,7 @@ The GitHub Actions deploy-readiness workflow runs the same validation steps, but
 - By default the deploy and destroy scripts use the `dev` files. Set `TOFU_ENVIRONMENT=<name>` to switch to another `<name>.auto.tfvars` and `<name>.s3.tfbackend` pair, or set `TOFU_VAR_FILE` and `TOFU_BACKEND_FILE` directly.
 - The remote state bucket and DynamoDB lock table must exist before the first apply. `scripts/bootstrap-tofu-backend.sh` can create them through the separate local-state root in `infra/bootstrap/tofu-backend/`.
 - `scripts/deploy.sh` writes `.artifacts/<service>-deployment.json` from the `deployment_summary` output.
+- `scripts/configure-self-webhook.sh` is a separate, explicit repository-mutation step. It reads `.artifacts/<service>-deployment.json` to find the deployed `webhookUrl`, then creates or updates the managed repository webhook under a separate GitHub admin-auth lane.
+- Keep label bootstrap conditional. If you leave `required_labels` empty, basic self-hook setup stops at webhook wiring. If you later set `required_labels`, create the matching GitHub labels as a separate repository task.
 - `scripts/destroy.sh` preserves DynamoDB and S3 data by default through targeted destroy. Set `DELETE_DATA=true` for full stack removal.
 - The root accepts raw application secrets because the Lambda runtime still expects them as environment variables. OpenTofu marks them sensitive in CLI output, but they still exist in state. Secrets Manager or SSM is the future path if you want to remove the raw values from state.

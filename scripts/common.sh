@@ -216,3 +216,77 @@ tofu_init_with_backend() {
     -force-copy \
     -backend-config="$backend_config_file"
 }
+
+default_deployment_output_path() {
+  local service_name="$1"
+
+  printf '%s/.artifacts/%s-deployment.json\n' "$REPO_ROOT" "$service_name"
+}
+
+default_github_webhook_metadata_path() {
+  local service_name="$1"
+
+  printf '%s/.artifacts/%s-github-webhook.json\n' "$REPO_ROOT" "$service_name"
+}
+
+normalize_github_repository_slug() {
+  local -r raw_value="$1"
+  local normalized_value="$raw_value"
+
+  normalized_value="${normalized_value%.git}"
+  normalized_value="${normalized_value%/}"
+  normalized_value="${normalized_value#https://github.com/}"
+  normalized_value="${normalized_value#http://github.com/}"
+  normalized_value="${normalized_value#ssh://git@github.com/}"
+  normalized_value="${normalized_value#git@github.com:}"
+  normalized_value="${normalized_value#git://github.com/}"
+  normalized_value="${normalized_value#/}"
+
+  if [[ ! "$normalized_value" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+    error "Unable to resolve a GitHub repository slug from '${raw_value}'. Set SELF_WEBHOOK_REPOSITORY=owner/repo or update the origin remote."
+  fi
+
+  printf '%s\n' "$normalized_value"
+}
+
+resolve_github_repository_slug() {
+  local repository_hint="${1:-}"
+  local origin_url=""
+
+  if [[ -n "$repository_hint" ]]; then
+    normalize_github_repository_slug "$repository_hint"
+    return
+  fi
+
+  if git -C "$REPO_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    origin_url="$(git -C "$REPO_ROOT" remote get-url origin 2>/dev/null || true)"
+  fi
+
+  if [[ -n "$origin_url" ]]; then
+    normalize_github_repository_slug "$origin_url"
+    return
+  fi
+
+  error "Unable to determine the target GitHub repository. Set SELF_WEBHOOK_REPOSITORY=owner/repo or configure the origin remote."
+}
+
+require_github_operator_auth() {
+  require_command gh
+
+  if [[ -n "${GH_TOKEN:-}" ]]; then
+    return
+  fi
+
+  if gh auth status >/dev/null 2>&1; then
+    return
+  fi
+
+  error "Missing GitHub operator auth. Authenticate with 'gh auth login' as a repository admin or export GH_TOKEN with Webhooks: write for the target repository."
+}
+
+gh_api() {
+  gh api \
+    -H "Accept: application/vnd.github+json" \
+    -H "X-GitHub-Api-Version: ${GITHUB_API_VERSION:-2026-03-10}" \
+    "$@"
+}
