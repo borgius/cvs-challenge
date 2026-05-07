@@ -21,10 +21,10 @@ resolve_health_url() {
   fi
 
   require_command jq
-  load_env "${ENV_FILE:-$REPO_ROOT/.env}"
+  load_env_if_present "${ENV_FILE:-$REPO_ROOT/.env}"
 
   service_name="${SERVICE_NAME:-pr-concierge}"
-  deployment_output_path="$REPO_ROOT/.artifacts/${service_name}-deployment.json"
+  deployment_output_path="$(default_deployment_output_path "$service_name")"
 
   if [[ ! -f "$deployment_output_path" ]]; then
     error "No health URL argument was provided and ${deployment_output_path} does not exist. Deploy first or pass the URL explicitly."
