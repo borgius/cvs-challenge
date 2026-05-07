@@ -7,10 +7,9 @@ on:
       - main
 
 jobs:
-  validate-build-and-terraform:
+  validate-build-and-opentofu:
     permissions:
       contents: read
-      id-token: write
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -28,20 +27,30 @@ jobs:
       - name: Build TypeScript
         run: npm run build
 
-      - name: Set up Terraform
-        uses: hashicorp/setup-terraform@v3
+      - name: Set up OpenTofu
+        uses: opentofu/setup-opentofu@v2
+        with:
+          tofu_wrapper: false
 
-      - name: Terraform format check
-        working-directory: infra/terraform
-        run: terraform fmt -check
+      - name: OpenTofu format check
+        working-directory: infra
+        run: tofu fmt -check -recursive
 
-      - name: Terraform init
-        working-directory: infra/terraform
-        run: terraform init -backend=false
+      - name: OpenTofu init (backend bootstrap root)
+        working-directory: infra/bootstrap/tofu-backend
+        run: tofu init -backend=false -input=false
 
-      - name: Terraform validate
+      - name: OpenTofu validate (backend bootstrap root)
+        working-directory: infra/bootstrap/tofu-backend
+        run: tofu validate -no-color
+
+      - name: OpenTofu init (application stack)
         working-directory: infra/terraform
-        run: terraform validate
+        run: tofu init -backend=false -input=false
+
+      - name: OpenTofu validate (application stack)
+        working-directory: infra/terraform
+        run: tofu validate -no-color
 
       - name: Deployment note
-        run: echo "The supported deployment path currently lives in scripts/deploy.sh and related Bash scripts. Terraform remains validation-only scaffolding for now."
+        run: echo "scripts/bootstrap-tofu-backend.sh bootstraps the remote state bucket and lock table, and scripts/deploy.sh packages the Lambda artifact and runs tofu init/apply. This workflow validates both OpenTofu roots without applying them."

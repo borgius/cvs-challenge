@@ -4,6 +4,8 @@ set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
+TOFU_ROOT="$REPO_ROOT/infra/terraform"
+TOFU_BACKEND_BOOTSTRAP_ROOT="$REPO_ROOT/infra/bootstrap/tofu-backend"
 
 info() {
   printf '==> %s\n' "$*"
@@ -38,6 +40,12 @@ require_command() {
 
   if ! command -v "$command_name" >/dev/null 2>&1; then
     error "Missing required command: ${command_name}"
+  fi
+}
+
+require_tofu() {
+  if ! command -v tofu >/dev/null 2>&1; then
+    error "Missing required command: tofu. Install OpenTofu and re-run this script. See the repository README for setup guidance."
   fi
 }
 
@@ -85,26 +93,6 @@ normalize_bool() {
   printf 'false\n'
 }
 
-aws_account_id() {
-  aws sts get-caller-identity --query 'Account' --output text
-}
-
-aws_partition() {
-  local region="$1"
-
-  case "$region" in
-    cn-*)
-      printf 'aws-cn\n'
-      ;;
-    us-gov-*)
-      printf 'aws-us-gov\n'
-      ;;
-    *)
-      printf 'aws\n'
-      ;;
-  esac
-}
-
 make_temp_file() {
   local prefix="$1"
   local temp_root="${TMPDIR:-/tmp}"
@@ -119,4 +107,75 @@ make_temp_dir() {
 
   temp_root="${temp_root%/}"
   mktemp -d "${temp_root}/${prefix}.XXXXXX"
+}
+
+csv_to_json_array() {
+  local value="${1:-}"
+
+  if [[ -z "$value" ]]; then
+    printf '[]\n'
+    return
+  fi
+
+  jq -cn --arg value "$value" '
+    $value
+    | split(",")
+    | map(gsub("^\\s+|\\s+$"; ""))
+    | map(select(length > 0))
+  '
+}
+
+default_tofu_state_key() {
+  local service_name="$1"
+  local environment="$2"
+
+  printf '%s/%s/terraform.tfstate\n' "$service_name" "$environment"
+}
+
+create_tofu_backend_config_file() {
+  local state_bucket="$1"
+  local state_key="$2"
+  local state_region="$3"
+  local lock_table="$4"
+  local backend_base
+  local backend_file
+
+  backend_base=$(make_temp_file pr-concierge-tfbackend)
+  rm -f -- "$backend_base"
+  backend_file="${backend_base}.tfbackend"
+
+  jq -rn \
+    --arg bucket "$state_bucket" \
+    --arg key "$state_key" \
+    --arg region "$state_region" \
+    --arg dynamodbTable "$lock_table" '
+      "bucket = \($bucket | @json)\n" +
+      "key = \($key | @json)\n" +
+      "region = \($region | @json)\n" +
+      "encrypt = true\n" +
+      "dynamodb_table = \($dynamodbTable | @json)\n"
+    ' >"$backend_file"
+
+  printf '%s\n' "$backend_file"
+}
+
+tofu_cmd_in_dir() {
+  local tofu_root="$1"
+  shift
+
+  tofu -chdir="$tofu_root" "$@"
+}
+
+tofu_cmd() {
+  tofu_cmd_in_dir "$TOFU_ROOT" "$@"
+}
+
+tofu_init_with_backend() {
+  local backend_config_file="$1"
+
+  tofu_cmd init \
+    -input=false \
+    -migrate-state \
+    -force-copy \
+    -backend-config="$backend_config_file"
 }

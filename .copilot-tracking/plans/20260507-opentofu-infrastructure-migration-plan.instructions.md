@@ -42,51 +42,51 @@ Replace the manual AWS CLI deployment path with an OpenTofu-based infrastructure
 
 ## Implementation Checklist
 
-### [ ] Phase 1: Establish the OpenTofu root contract
+### [x] Phase 1: Establish the OpenTofu root contract
 
-- [ ] Task 1.1: Expand the root module into a real OpenTofu entrypoint
+- [x] Task 1.1: Expand the root module into a real OpenTofu entrypoint
 
   - Details: `.copilot-tracking/details/20260507-opentofu-infrastructure-migration-details.md` (Lines 11-29)
 
-- [ ] Task 1.2: Create repo-local wrapper modules that hide upstream complexity
+- [x] Task 1.2: Create repo-local wrapper modules that hide upstream complexity
 
   - Details: `.copilot-tracking/details/20260507-opentofu-infrastructure-migration-details.md` (Lines 31-60)
 
-### [ ] Phase 2: Implement the AWS footprint with vetted upstream modules
+### [x] Phase 2: Implement the AWS footprint with vetted upstream modules
 
-- [ ] Task 2.1: Implement the Lambda service wrapper around the upstream Lambda module
+- [x] Task 2.1: Implement the Lambda service wrapper around the upstream Lambda module
 
   - Details: `.copilot-tracking/details/20260507-opentofu-infrastructure-migration-details.md` (Lines 64-82)
 
-- [ ] Task 2.2: Implement the HTTP API wrapper and root-level Lambda permission
+- [x] Task 2.2: Implement the HTTP API wrapper and root-level Lambda permission
 
   - Details: `.copilot-tracking/details/20260507-opentofu-infrastructure-migration-details.md` (Lines 84-101)
 
-- [ ] Task 2.3: Implement the data wrapper for DynamoDB and optional S3
+- [x] Task 2.3: Implement the data wrapper for DynamoDB and optional S3
 
   - Details: `.copilot-tracking/details/20260507-opentofu-infrastructure-migration-details.md` (Lines 103-119)
 
-- [ ] Task 2.4: Implement observability with SNS and CloudWatch alarms
+- [x] Task 2.4: Implement observability with SNS and CloudWatch alarms
 
   - Details: `.copilot-tracking/details/20260507-opentofu-infrastructure-migration-details.md` (Lines 121-137)
 
-### [ ] Phase 3: Replace AWS CLI orchestration with OpenTofu script automation
+### [x] Phase 3: Replace AWS CLI orchestration with OpenTofu script automation
 
-- [ ] Task 3.1: Convert `deploy.sh` into an OpenTofu apply workflow
+- [x] Task 3.1: Convert `deploy.sh` into an OpenTofu apply workflow
 
   - Details: `.copilot-tracking/details/20260507-opentofu-infrastructure-migration-details.md` (Lines 141-158)
 
-- [ ] Task 3.2: Convert `destroy.sh` to OpenTofu destroy semantics while preserving safety
+- [x] Task 3.2: Convert `destroy.sh` to OpenTofu destroy semantics while preserving safety
 
   - Details: `.copilot-tracking/details/20260507-opentofu-infrastructure-migration-details.md` (Lines 160-175)
 
-### [ ] Phase 4: Make the repository honest about the new deployment path
+### [x] Phase 4: Make the repository honest about the new deployment path
 
-- [ ] Task 4.1: Update docs to describe OpenTofu as the active deployment path
+- [x] Task 4.1: Update docs to describe OpenTofu as the active deployment path
 
   - Details: `.copilot-tracking/details/20260507-opentofu-infrastructure-migration-details.md` (Lines 179-195)
 
-- [ ] Task 4.2: Update workflow and verification expectations for OpenTofu
+- [x] Task 4.2: Update workflow and verification expectations for OpenTofu
 
   - Details: `.copilot-tracking/details/20260507-opentofu-infrastructure-migration-details.md` (Lines 197-214)
 

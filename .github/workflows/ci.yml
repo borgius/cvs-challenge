@@ -25,5 +25,5 @@ jobs:
       - name: Build TypeScript
         run: npm run build
 
-      - name: Type-check
-        run: npm run typecheck
+      - name: Run default test workflow
+        run: npm run test

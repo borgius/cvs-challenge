@@ -32,7 +32,8 @@ Important: the planning docs are slightly ahead of the implementation. For examp
 - `src/risk/classifier.ts` — deterministic risk classification rules
 - `src/storage/evaluationRepository.ts` — persistence interface and placeholder repository
 - `src/types/` — shared domain and GitHub payload types
-- `infra/terraform/` — starter Terraform configuration
+- `infra/bootstrap/tofu-backend/` — one-time backend bootstrap root for the OpenTofu S3 bucket and DynamoDB lock table
+- `infra/terraform/` — OpenTofu root and local wrapper modules for the AWS footprint
 - `docs/` — product, build-plan, and multi-agent planning notes
 - `.github/workflows/` — CI and deploy-readiness workflows
 - `dist/` — generated build output; do not edit by hand
@@ -44,7 +45,10 @@ Use `npm` in this repository. The lockfile is `package-lock.json`.
 - Install dependencies: `npm install`
 - Build the app: `npm run build`
 - Type-check only: `npm run typecheck`
-- Run the current test command: `npm run test`
+- Type-check the Vitest harness: `npm run typecheck:tests`
+- Run the default local verification command: `npm run test`
+- Run only the local Lambda integration suite: `npm run test:integration:local`
+- Run the deployed HTTP API integration suite: `npm run test:integration:deployed`
 - Start the local development server: `npm run dev`
 - Start the compiled build: `npm start`
 
@@ -59,10 +63,20 @@ Variables currently defined by the repo:
 - `GITHUB_WEBHOOK_SECRET` — required for webhook signature validation
 - `GITHUB_TOKEN` — required for GitHub API file lookups
 - `AWS_REGION` — optional, defaults to `us-east-1`
+- `TOFU_STATE_BUCKET` — required by the deployment scripts for remote OpenTofu state
+- `TOFU_LOCK_TABLE` — required by the deployment scripts for DynamoDB-backed state locking
+- `TOFU_STATE_KEY` — optional override for the remote state object key
+- `TOFU_STATE_REGION` — optional override for the remote state bucket and lock table region
+- `TOFU_STATE_BUCKET_FORCE_DESTROY` — optional override for backend bootstrap destroy behavior
+- `TOFU_STATE_BUCKET_VERSIONING_ENABLED` — optional toggle for backend state bucket versioning
+- `TOFU_LOCK_TABLE_POINT_IN_TIME_RECOVERY_ENABLED` — optional toggle for backend lock table PITR
+- `TOFU_LOCK_TABLE_DELETION_PROTECTION_ENABLED` — optional toggle for backend lock table deletion protection
 - `EVALUATIONS_TABLE_NAME` — required by `loadAppConfig()`
 - `RAW_EVENT_BUCKET_NAME` — optional
 - `ENABLE_RAW_EVENT_ARCHIVE` — optional boolean flag
 - `REQUIRED_LABELS` — optional comma-separated labels
+
+Deployment-specific overrides are also available in `.env.example`, including OpenTofu backend settings, resource naming overrides, log retention settings, alarm email subscriptions, and data protection toggles used by the OpenTofu-backed scripts.
 
 Notes:
 
@@ -85,22 +99,26 @@ Notes:
 
 ## Testing and verification
 
-At the moment, there is no dedicated unit or integration test runner in the repo.
-`npm run test` currently delegates to `npm run typecheck`.
+The repo now uses Vitest for integration coverage.
+`npm run test` type-checks the production source, type-checks the Vitest harness, and runs the local Lambda integration suite.
+`npm run test:integration:deployed` runs the deployed HTTP API suite and expects either `DEPLOYED_HEALTH_URL` / `DEPLOYED_WEBHOOK_URL` or `.artifacts/<service>-deployment.json`.
+The deployed suite keeps its default checks safe by covering `GET /health`, empty-body webhook rejection, and invalid-signature rejection. A real deployed webhook success-path case is opt-in and skipped unless `DEPLOYED_WEBHOOK_SECRET`, `DEPLOYED_PR_REPOSITORY`, and `DEPLOYED_PR_NUMBER` are set.
 
 Commands verified in this repository:
 
 - `npm run build`
 - `npm run test`
-- `terraform fmt -check`
-- `terraform init -backend=false`
-- `terraform validate`
+- `npm run test:integration:deployed`
+- `tofu fmt -check`
+- `tofu init -backend=false -input=false`
+- `tofu validate`
 
-Infrastructure commands should be run from `infra/terraform`.
+Infrastructure commands should be run from `infra/terraform` for the app stack and `infra/bootstrap/tofu-backend` for backend bootstrap work.
 
 If you add tests:
 
 - Prefer `*.spec.ts` files or a `tests/` directory; the risk classifier already treats those locations as test-only changes.
+- Keep integration coverage under `tests/integration/` and prefer the exported Lambda `handler` for local verification.
 - Keep tests focused on changed behavior.
 - Update `package.json` scripts and this file if you introduce a real test runner.
 
@@ -119,15 +137,18 @@ Before finishing a change, run the relevant app checks plus any targeted tests y
 
 ## Infrastructure and deployment notes
 
-Terraform currently provides a starter configuration, not a full AWS resource graph.
-The checked-in Terraform defines provider setup, variables, shared tags, and outputs. It does not yet provision the full planned API Gateway, Lambda, DynamoDB, SNS, and S3 footprint described in the docs.
+`infra/terraform` now defines the active AWS footprint for PR Concierge through OpenTofu, including the Lambda function, HTTP API, DynamoDB table, optional S3 bucket, SNS topic, and CloudWatch alarms.
 
-Likewise, the GitHub Actions workflows are currently validation/readiness workflows:
+The root uses an S3 backend configured at init time, with DynamoDB used for state locking. The deployment scripts generate the temporary backend config and pass it to `tofu init`.
 
-- `.github/workflows/ci.yml` runs install, build, and type-check on push and pull request
-- `.github/workflows/deploy.yml` runs build plus Terraform format/init/validate and prints a deployment note
+The one-time backend bootstrap path lives in `infra/bootstrap/tofu-backend/` and is wrapped by `scripts/bootstrap-tofu-backend.sh`. That root keeps local state on purpose so it can create the remote backend resources for the main stack.
 
-Do not describe deployment as fully automated unless you also add the missing plan/apply or packaging steps.
+The GitHub Actions workflows are still validation/readiness workflows:
+
+- `.github/workflows/ci.yml` runs install, build, and the default test workflow on push and pull request
+- `.github/workflows/deploy.yml` runs build plus OpenTofu format/init/validate and prints a deployment note
+
+Do not describe deployment as fully automated unless you also add the missing CI-side plan/apply or packaging steps. Today the supported operator path still runs through `scripts/deploy.sh` and `scripts/destroy.sh`.
 
 ## Security considerations
 
@@ -140,7 +161,7 @@ Do not describe deployment as fully automated unless you also add the missing pl
 
 Be careful not to confuse planned architecture with shipped behavior:
 
-- The docs describe DynamoDB-backed persistence, but the current application still uses `ConsoleEvaluationRepository`, which logs the evaluation instead of storing it remotely.
+- The deployed path can use DynamoDB-backed persistence, but local development often still uses `EVALUATION_REPOSITORY=console` to avoid requiring AWS resources.
 - The docs describe optional raw event archiving, but the app currently only computes an S3 key placeholder when the feature flag is enabled.
 - Some planning docs describe paths that no longer exist. The code in `src/` is authoritative.
 

@@ -1,0 +1,27 @@
+{
+  "action": "opened",
+  "number": 42,
+  "pull_request": {
+    "number": 42,
+    "head": {
+      "ref": "feature/lambda-integration-tests",
+      "sha": "0123456789abcdef0123456789abcdef01234567"
+    },
+    "base": {
+      "ref": "main",
+      "sha": "fedcba9876543210fedcba9876543210fedcba98"
+    },
+    "labels": [
+      {
+        "name": "safe-to-deploy"
+      }
+    ]
+  },
+  "repository": {
+    "full_name": "octo-org/pr-concierge",
+    "owner": {
+      "login": "octo-org"
+    },
+    "name": "pr-concierge"
+  }
+}
