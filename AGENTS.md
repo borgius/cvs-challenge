@@ -58,25 +58,30 @@ Local development is most reliable on the same major Node version used in CI. Th
 
 Use `.env.example` as the canonical template. `.env` is gitignored.
 
-Variables currently defined by the repo:
+Keep `.env` focused on app runtime values and the small set of deployment secrets that still become Lambda environment variables:
 
 - `GITHUB_WEBHOOK_SECRET` — required for webhook signature validation
 - `GITHUB_TOKEN` — required for GitHub API file lookups
 - `AWS_REGION` — optional, defaults to `us-east-1`
-- `TOFU_STATE_BUCKET` — required by the deployment scripts for remote OpenTofu state
-- `TOFU_LOCK_TABLE` — required by the deployment scripts for DynamoDB-backed state locking
-- `TOFU_STATE_KEY` — optional override for the remote state object key
-- `TOFU_STATE_REGION` — optional override for the remote state bucket and lock table region
-- `TOFU_STATE_BUCKET_FORCE_DESTROY` — optional override for backend bootstrap destroy behavior
-- `TOFU_STATE_BUCKET_VERSIONING_ENABLED` — optional toggle for backend state bucket versioning
-- `TOFU_LOCK_TABLE_POINT_IN_TIME_RECOVERY_ENABLED` — optional toggle for backend lock table PITR
-- `TOFU_LOCK_TABLE_DELETION_PROTECTION_ENABLED` — optional toggle for backend lock table deletion protection
 - `EVALUATIONS_TABLE_NAME` — required by `loadAppConfig()`
 - `RAW_EVENT_BUCKET_NAME` — optional
 - `ENABLE_RAW_EVENT_ARCHIVE` — optional boolean flag
 - `REQUIRED_LABELS` — optional comma-separated labels
+- `EVALUATION_REPOSITORY` — optional local runtime override
 
-Deployment-specific overrides are also available in `.env.example`, including OpenTofu backend settings, resource naming overrides, log retention settings, alarm email subscriptions, and data protection toggles used by the OpenTofu-backed scripts.
+Do not use `.env` as the home for ordinary OpenTofu root variables. Copy `infra/terraform/env/dev.auto.tfvars.example` to `infra/terraform/env/dev.auto.tfvars` and keep non-secret root variables there instead. Copy `infra/terraform/backend/dev.s3.tfbackend.example` to `infra/terraform/backend/dev.s3.tfbackend` and keep backend coordinates there.
+
+For the one-time backend bootstrap script, `.env` or the shell may also provide:
+
+- `TOFU_STATE_BUCKET`
+- `TOFU_LOCK_TABLE`
+- `TOFU_STATE_REGION`
+- `TOFU_STATE_BUCKET_FORCE_DESTROY`
+- `TOFU_STATE_BUCKET_VERSIONING_ENABLED`
+- `TOFU_LOCK_TABLE_POINT_IN_TIME_RECOVERY_ENABLED`
+- `TOFU_LOCK_TABLE_DELETION_PROTECTION_ENABLED`
+
+Supported AWS authentication paths are the standard AWS credential-chain options such as `AWS_PROFILE`, `aws sso login`, shared-config assume-role, and OIDC/web identity. Do not add AWS credentials to `.env`, `*.auto.tfvars`, or `*.s3.tfbackend` files.
 
 Notes:
 
@@ -139,7 +144,9 @@ Before finishing a change, run the relevant app checks plus any targeted tests y
 
 `infra/terraform` now defines the active AWS footprint for PR Concierge through OpenTofu, including the Lambda function, HTTP API, DynamoDB table, optional S3 bucket, SNS topic, and CloudWatch alarms.
 
-The root uses an S3 backend configured at init time, with DynamoDB used for state locking. The deployment scripts generate the temporary backend config and pass it to `tofu init`.
+The root uses an S3 backend configured at init time, with DynamoDB used for state locking. The steady-state deploy and destroy scripts read backend coordinates from `infra/terraform/backend/<env>.s3.tfbackend` and non-secret root variables from `infra/terraform/env/<env>.auto.tfvars`.
+
+The deploy and destroy scripts reserve `TF_VAR_...` for the remaining GitHub secrets that still enter managed resources. AWS credentials stay on the AWS credential chain rather than in repo-local config files.
 
 The one-time backend bootstrap path lives in `infra/bootstrap/tofu-backend/` and is wrapped by `scripts/bootstrap-tofu-backend.sh`. That root keeps local state on purpose so it can create the remote backend resources for the main stack.
 
@@ -154,6 +161,8 @@ Do not describe deployment as fully automated unless you also add the missing CI
 
 - Preserve GitHub webhook signature validation in `src/github/signature.ts` and `src/app.ts`.
 - Keep secrets in `.env` locally and in secret managers or CI configuration remotely.
+- Keep AWS provider and backend credentials out of `.env`, `*.auto.tfvars`, and `*.s3.tfbackend` files. Use the AWS credential chain instead.
+- Remember that the GitHub secrets still land in OpenTofu state today because the Lambda resource persists them as environment variables. Protect the backend bucket and lock table accordingly.
 - If you add AWS integrations, document the required IAM permissions and environment variables.
 - Prefer least-privilege changes in Terraform and keep security-sensitive behavior explicit and reviewable.
 

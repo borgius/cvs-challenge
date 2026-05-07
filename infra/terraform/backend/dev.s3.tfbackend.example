@@ -1,0 +1,15 @@
+# Copy this file to infra/terraform/backend/dev.s3.tfbackend and edit it for
+# your environment. Keep the real *.s3.tfbackend file local and untracked.
+#
+# This file is for backend coordinates only. Do not put AWS access keys,
+# session tokens, or other credentials here.
+
+bucket         = "your-opentofu-state-bucket"
+key            = "pr-concierge/dev/terraform.tfstate"
+region         = "us-east-1"
+encrypt        = true
+dynamodb_table = "your-opentofu-lock-table"
+
+# Optional backend safety rail if you want the S3 backend to refuse the wrong
+# AWS account as well.
+# allowed_account_ids = ["123456789012"]

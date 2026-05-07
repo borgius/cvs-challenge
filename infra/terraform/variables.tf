@@ -4,6 +4,19 @@ variable "aws_region" {
   default     = "us-east-1"
 }
 
+variable "allowed_account_ids" {
+  description = "Optional AWS account IDs allowed by the root provider as a deployment safety rail."
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition = alltrue([
+      for account_id in var.allowed_account_ids : can(regex("^\\d{12}$", account_id))
+    ])
+    error_message = "allowed_account_ids must contain 12-digit AWS account IDs."
+  }
+}
+
 variable "environment" {
   description = "Deployment environment label applied to tags and naming defaults."
   type        = string

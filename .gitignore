@@ -6,4 +6,8 @@ dist/
 .terraform/
 *.tfstate
 *.tfstate.*
+infra/terraform/env/*.auto.tfvars
+infra/terraform/env/*.auto.tfvars.json
+infra/terraform/backend/*.s3.tfbackend
+infra/terraform/backend/*.tfbackend
 .DS_Store

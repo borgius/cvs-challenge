@@ -10,10 +10,10 @@ enable_error_trap
 require_tofu
 require_command jq
 
-load_env "${ENV_FILE:-$REPO_ROOT/.env}"
+load_env_if_present "${ENV_FILE:-$REPO_ROOT/.env}"
 
 SERVICE_NAME="${SERVICE_NAME:-pr-concierge}"
-ENVIRONMENT="${ENVIRONMENT:-dev}"
+ENVIRONMENT="$(default_tofu_environment_name)"
 AWS_REGION="${AWS_REGION:-us-east-1}"
 TOFU_STATE_BUCKET="${TOFU_STATE_BUCKET:-}"
 TOFU_STATE_REGION="${TOFU_STATE_REGION:-$AWS_REGION}"

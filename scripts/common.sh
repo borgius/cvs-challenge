@@ -62,11 +62,33 @@ load_env() {
   set +a
 }
 
+load_env_if_present() {
+  local env_file="${1:-$REPO_ROOT/.env}"
+
+  if [[ ! -f "$env_file" ]]; then
+    return
+  fi
+
+  set -a
+  # shellcheck source=/dev/null
+  source "$env_file"
+  set +a
+}
+
 require_env() {
   local env_name="$1"
 
   if [[ -z "${!env_name:-}" ]]; then
     error "Missing required environment variable: ${env_name}"
+  fi
+}
+
+require_file() {
+  local -r file_path="$1"
+  local -r error_message="${2:-Missing required file: ${file_path}}"
+
+  if [[ ! -f "$file_path" ]]; then
+    error "$error_message"
   fi
 }
 
@@ -109,22 +131,6 @@ make_temp_dir() {
   mktemp -d "${temp_root}/${prefix}.XXXXXX"
 }
 
-csv_to_json_array() {
-  local value="${1:-}"
-
-  if [[ -z "$value" ]]; then
-    printf '[]\n'
-    return
-  fi
-
-  jq -cn --arg value "$value" '
-    $value
-    | split(",")
-    | map(gsub("^\\s+|\\s+$"; ""))
-    | map(select(length > 0))
-  '
-}
-
 default_tofu_state_key() {
   local service_name="$1"
   local environment="$2"
@@ -132,31 +138,62 @@ default_tofu_state_key() {
   printf '%s/%s/terraform.tfstate\n' "$service_name" "$environment"
 }
 
-create_tofu_backend_config_file() {
-  local state_bucket="$1"
-  local state_key="$2"
-  local state_region="$3"
-  local lock_table="$4"
-  local backend_base
-  local backend_file
+default_tofu_environment_name() {
+  printf '%s\n' "${TOFU_ENVIRONMENT:-${ENVIRONMENT:-dev}}"
+}
 
-  backend_base=$(make_temp_file pr-concierge-tfbackend)
-  rm -f -- "$backend_base"
-  backend_file="${backend_base}.tfbackend"
+default_tofu_var_file() {
+  local env_name="$1"
 
-  jq -rn \
-    --arg bucket "$state_bucket" \
-    --arg key "$state_key" \
-    --arg region "$state_region" \
-    --arg dynamodbTable "$lock_table" '
-      "bucket = \($bucket | @json)\n" +
-      "key = \($key | @json)\n" +
-      "region = \($region | @json)\n" +
-      "encrypt = true\n" +
-      "dynamodb_table = \($dynamodbTable | @json)\n"
-    ' >"$backend_file"
+  printf '%s/env/%s.auto.tfvars\n' "$TOFU_ROOT" "$env_name"
+}
 
-  printf '%s\n' "$backend_file"
+resolve_tofu_var_file() {
+  local env_name="$1"
+
+  if [[ -n "${TOFU_VAR_FILE:-}" ]]; then
+    printf '%s\n' "$TOFU_VAR_FILE"
+    return
+  fi
+
+  default_tofu_var_file "$env_name"
+}
+
+default_tofu_backend_config_file() {
+  local env_name="$1"
+
+  printf '%s/backend/%s.s3.tfbackend\n' "$TOFU_ROOT" "$env_name"
+}
+
+resolve_tofu_backend_config_file() {
+  local env_name="$1"
+
+  if [[ -n "${TOFU_BACKEND_FILE:-}" ]]; then
+    printf '%s\n' "$TOFU_BACKEND_FILE"
+    return
+  fi
+
+  default_tofu_backend_config_file "$env_name"
+}
+
+export_tofu_root_secret_from_env() {
+  local -r source_env_name="$1"
+  local -r target_variable_name="$2"
+  local -r target_env_name="TF_VAR_${target_variable_name}"
+  local -r source_value="${!source_env_name:-}"
+  local -r target_value="${!target_env_name:-}"
+
+  if [[ -n "$target_value" ]]; then
+    export "${target_env_name}=${target_value}"
+    return
+  fi
+
+  if [[ -n "$source_value" ]]; then
+    export "${target_env_name}=${source_value}"
+    return
+  fi
+
+  error "Missing required deployment secret. Set ${source_env_name} in .env or export ${target_env_name}."
 }
 
 tofu_cmd_in_dir() {
