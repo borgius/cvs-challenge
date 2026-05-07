@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import type { LambdaContext, LambdaEvent } from 'hono/aws-lambda';
-import { logger } from 'hono/logger';
+import { logger as honoLogger } from 'hono/logger';
 import { prettyJSON } from 'hono/pretty-json';
 import { requestId, type RequestIdVariables } from 'hono/request-id';
 import { secureHeaders } from 'hono/secure-headers';
@@ -9,10 +9,10 @@ import { loadAppConfig } from './config/env.ts';
 import { fetchPullRequestFiles } from './github/client.ts';
 import { isValidGitHubSignature } from './github/signature.ts';
 import { evaluatePullRequest } from './services/evaluatePullRequest.ts';
-import { ConsoleEvaluationRepository } from './storage/evaluationRepository.ts';
+import { createEvaluationRepository } from './storage/evaluationRepository.ts';
 import { supportedPullRequestActions } from './types/github.ts';
 import { isPullRequestPayload, isSupportedPullRequestAction } from './utils/guards.ts';
-import { accessLogger } from './utils/logger.ts';
+import { accessLogger, logger } from './utils/logger.ts';
 import { buildRawEventKey } from './utils/storageKeys.ts';
 
 type AppBindings = {
@@ -34,7 +34,7 @@ app.use(
     generator: (c) => c.env.lambdaContext?.awsRequestId ?? crypto.randomUUID(),
   }),
 );
-app.use('*', logger(accessLogger));
+app.use('*', honoLogger(accessLogger));
 app.use('*', secureHeaders());
 app.use('*', prettyJSON());
 
@@ -63,6 +63,7 @@ app.post('/webhooks/github', async (c) => {
 
   try {
     const config = loadAppConfig();
+    const repository = createEvaluationRepository(config);
     const signatureHeader = c.req.header('x-hub-signature-256');
 
     if (!isValidGitHubSignature(rawBody, signatureHeader, config.githubWebhookSecret)) {
@@ -147,22 +148,17 @@ app.post('/webhooks/github', async (c) => {
       requiredLabels: config.requiredLabels,
       githubDeliveryId,
       rawEventS3Key,
-      repository: new ConsoleEvaluationRepository(),
+      repository,
     });
 
-    console.log(
-      JSON.stringify({
-        timestamp: new Date().toISOString(),
-        level: 'INFO',
-        message: 'Pull request evaluation completed',
-        requestId,
-        repositoryFullName,
-        pullRequestNumber: pullNumber,
-        action: payload.action,
-        riskLevel: evaluation.riskAssessment.riskLevel,
-        changedFileCount: changedFiles.length,
-      }),
-    );
+    logger.info('Pull request evaluation completed', {
+      requestId,
+      repositoryFullName,
+      pullRequestNumber: pullNumber,
+      action: payload.action,
+      riskLevel: evaluation.riskAssessment.riskLevel,
+      changedFileCount: changedFiles.length,
+    });
 
     return c.json({
       message: 'Pull request evaluated successfully.',
@@ -177,22 +173,7 @@ app.post('/webhooks/github', async (c) => {
       },
     });
   } catch (error) {
-    console.error(
-      JSON.stringify({
-        timestamp: new Date().toISOString(),
-        level: 'ERROR',
-        message: 'Failed to process GitHub webhook',
-        requestId,
-        error:
-          error instanceof Error
-            ? {
-                name: error.name,
-                message: error.message,
-                stack: error.stack,
-              }
-            : error,
-      }),
-    );
+    logger.error('Failed to process GitHub webhook', { requestId, error: error instanceof Error ? error : new Error(String(error)) });
 
     return c.json(
       {

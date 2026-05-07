@@ -44,4 +44,4 @@ jobs:
         run: terraform validate
 
       - name: Deployment note
-        run: echo "Add AWS OIDC credential configuration and terraform plan/apply steps when the full infrastructure resources are ready."
+        run: echo "The supported deployment path currently lives in scripts/deploy.sh and related Bash scripts. Terraform remains validation-only scaffolding for now."

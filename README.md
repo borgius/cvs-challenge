@@ -14,16 +14,18 @@ The HTTP layer now runs on [Hono](https://hono.dev/) so the project uses Hono ro
 - deterministic risk scoring from changed file paths
 - branch naming and optional required-label checks
 - structured JSON logging
-- placeholder evaluation persistence that currently logs records and is ready to be swapped for DynamoDB
-- starter GitHub Actions and Terraform scaffolding
+- DynamoDB-backed evaluation persistence for deployed environments, with console logging available for local development
+- manual AWS deployment scripts in `scripts/`
+- starter GitHub Actions and Terraform validation scaffolding
 
 ## Quick start
 
-1. Fill in the placeholders in `.env`.
-2. Install dependencies with `npm install` if you have not already.
-3. Build the project with `npm run build`.
-4. Run `npm run dev` to start the local Hono server on port `3000`.
-5. Call `GET /health` or send a GitHub webhook to `POST /webhooks/github`.
+1. Copy `.env.example` to `.env` if the file does not already exist.
+2. Fill in the placeholders in `.env`.
+3. Install dependencies with `npm install` if you have not already.
+4. Build the project with `npm run build`.
+5. Run `npm run dev` to start the local Hono server on port `3000`.
+6. Call `GET /health` or send a GitHub webhook to `POST /webhooks/github`.
 
 ## Environment variables
 
@@ -36,6 +38,31 @@ The HTTP layer now runs on [Hono](https://hono.dev/) so the project uses Hono ro
 | `RAW_EVENT_BUCKET_NAME` | No | Optional S3 bucket name for raw webhook archiving |
 | `ENABLE_RAW_EVENT_ARCHIVE` | No | Enables raw event S3 key generation when set to `true` |
 | `REQUIRED_LABELS` | No | Comma-separated labels to enforce, such as `safe-to-deploy,needs-platform-review` |
+| `EVALUATION_REPOSITORY` | No | `console` for local logging or `dynamodb` for deployed persistence |
+
+## Manual AWS deployment
+
+The supported deployment path in this repo is now manual Bash automation with the AWS CLI.
+
+Prerequisites:
+
+- AWS CLI authenticated against the target account
+- `jq`
+- `zip`
+- `npm`
+
+Scripts:
+
+- `scripts/package-lambda.sh` — builds the app and creates a Lambda zip in `.artifacts/`
+- `scripts/deploy.sh` — creates or updates DynamoDB, IAM, Lambda, and an HTTP API
+- `scripts/smoke-test.sh` — calls the deployed `GET /health` endpoint
+- `scripts/destroy.sh` — removes the deployed API, Lambda, and IAM role; set `DELETE_DATA=true` to also remove DynamoDB and S3 resources
+
+Notes:
+
+- The deploy script forces the Lambda environment to use DynamoDB persistence.
+- If `GITHUB_WEBHOOK_SECRET` or `GITHUB_TOKEN` still use placeholder values, deployment can still complete, but real webhook processing will not be useful yet.
+- Terraform remains in the repo as a validation scaffold, not the active deployment path.
 
 ## Project layout
 
@@ -44,7 +71,8 @@ The HTTP layer now runs on [Hono](https://hono.dev/) so the project uses Hono ro
 - `src/github/` — GitHub signature validation and changed-file API lookup
 - `src/risk/` — deterministic risk classification rules
 - `src/services/` — PR evaluation workflow assembly
-- `src/storage/` — persistence abstraction and placeholder implementation
+- `src/storage/` — persistence abstraction with console and DynamoDB implementations
+- `scripts/` — manual packaging, deployment, smoke-test, and teardown scripts
 - `infra/terraform/` — starter Terraform configuration for the AWS footprint
 - `.github/workflows/` — CI and deployment-readiness workflows
 
@@ -52,8 +80,8 @@ The HTTP layer now runs on [Hono](https://hono.dev/) so the project uses Hono ro
 
 This scaffold keeps the MVP foundation small and honest:
 
-- DynamoDB persistence is represented by `ConsoleEvaluationRepository` for now.
+- Raw event S3 archiving is still a placeholder and currently only generates the future object key.
 - Terraform is only the starter frame, not the full AWS resource graph yet.
-- GitHub Actions validate the repo and Terraform layout, but do not apply infrastructure yet.
+- GitHub Actions validate the repo and Terraform layout, but they do not deploy infrastructure.
 
 That keeps the repo ready for the next implementation pass without overselling unfinished infrastructure. A little less smoke, a little more signal.

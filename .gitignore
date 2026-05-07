@@ -1,6 +1,7 @@
 .hypergrep/
 node_modules/
 dist/
+.artifacts/
 .env
 .terraform/
 *.tfstate

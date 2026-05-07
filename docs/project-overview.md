@@ -52,7 +52,7 @@ The MVP should include:
 - Structured JSON logging
 - CloudWatch alarm for Lambda errors
 - SNS topic for alarm notifications
-- Terraform modules and GitHub Actions deploy flow
+- Manual Bash deployment scripts that create and update the AWS footprint with the AWS CLI
 
 ## Stretch scope
 
@@ -75,8 +75,8 @@ Main components:
 - Optional S3 bucket for raw payload archive
 - CloudWatch logs, metrics, and alarms
 - SNS topic for alert delivery
-- GitHub Actions with AWS OIDC for CI/CD
-- Terraform for all AWS resources
+- GitHub Actions for repo validation
+- Bash deployment scripts that drive AWS CLI resource creation and updates
 
 ## Key design choices
 
@@ -96,6 +96,11 @@ The first version should be deterministic. AI can improve summaries later, but t
 
 The deployed runtime should be standard AWS Lambda Node.js 20.
 This repo already uses Bun for local scripts, so Bun can still be used for local install, build, and test commands if helpful. The final artifact should still target Node.js 20 for AWS.
+
+### Manual Bash deployment over full Terraform rollout
+
+For the current repository stage, manual Bash scripts are the supported deployment path.
+That keeps the deployment flow concrete and easy to run after an `aws` login while Terraform stays as a validation scaffold for future infrastructure work.
 
 ## Data model
 

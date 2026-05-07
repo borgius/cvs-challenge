@@ -2,6 +2,9 @@
 
 This directory is the starting point for the PR Concierge AWS footprint.
 
+The active deployment path for the repository is currently `scripts/deploy.sh`, which uses the AWS CLI and other Bash scripts to create and update resources manually.
+Terraform remains checked in here as a validation scaffold and future expansion point.
+
 ## Intended resources
 
 - API Gateway HTTP API
