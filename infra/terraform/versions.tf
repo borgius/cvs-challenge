@@ -4,11 +4,12 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 5.0"
+      version = ">= 6.42, < 7.0"
     }
   }
 }
 
 provider "aws" {
-  region = var.aws_region
+  region              = var.aws_region
+  allowed_account_ids = length(var.allowed_account_ids) > 0 ? var.allowed_account_ids : null
 }

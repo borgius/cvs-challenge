@@ -1,4 +1,4 @@
-name: deploy-readiness
+name: deploy
 
 on:
   workflow_dispatch:
@@ -6,15 +6,47 @@ on:
     branches:
       - main
 
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
-  validate-build-and-terraform:
+  deploy:
     permissions:
       contents: read
       id-token: write
     runs-on: ubuntu-latest
+    env:
+      AWS_REGION: us-east-1
+      SERVICE_NAME: pr-concierge
+      TOFU_ENVIRONMENT: dev
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Validate required repository secrets
+        env:
+          AWS_DEPLOY_ROLE_ARN: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          PR_CONCIERGE_GITHUB_TOKEN: ${{ secrets.PR_CONCIERGE_GITHUB_TOKEN }}
+          PR_CONCIERGE_WEBHOOK_SECRET: ${{ secrets.PR_CONCIERGE_WEBHOOK_SECRET }}
+        run: |
+          set -Eeuo pipefail
+
+          missing=0
+
+          for secret_name in \
+            AWS_DEPLOY_ROLE_ARN \
+            PR_CONCIERGE_GITHUB_TOKEN \
+            PR_CONCIERGE_WEBHOOK_SECRET; do
+            if [[ -z "${!secret_name:-}" ]]; then
+              echo "::error::Missing required GitHub Actions repository secret: ${secret_name}"
+              missing=1
+            fi
+          done
+
+          if [[ "$missing" -ne 0 ]]; then
+            exit 1
+          fi
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -28,20 +60,114 @@ jobs:
       - name: Build TypeScript
         run: npm run build
 
-      - name: Set up Terraform
-        uses: hashicorp/setup-terraform@v3
+      - name: Run default test workflow
+        run: npm run test
 
-      - name: Terraform format check
+      - name: Set up OpenTofu
+        uses: opentofu/setup-opentofu@v2
+        with:
+          tofu_wrapper: false
+
+      - name: OpenTofu format check
+        working-directory: infra
+        run: tofu fmt -check -recursive
+
+      - name: OpenTofu init (backend bootstrap root)
+        working-directory: infra/bootstrap/tofu-backend
+        run: tofu init -backend=false -input=false
+
+      - name: OpenTofu validate (backend bootstrap root)
+        working-directory: infra/bootstrap/tofu-backend
+        run: tofu validate -no-color
+
+      - name: OpenTofu init (application stack)
         working-directory: infra/terraform
-        run: terraform fmt -check
+        run: tofu init -backend=false -input=false
 
-      - name: Terraform init
+      - name: OpenTofu validate (application stack)
         working-directory: infra/terraform
-        run: terraform init -backend=false
+        run: tofu validate -no-color
 
-      - name: Terraform validate
-        working-directory: infra/terraform
-        run: terraform validate
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: github-actions-pr-concierge-deploy
 
-      - name: Deployment note
-        run: echo "Add AWS OIDC credential configuration and terraform plan/apply steps when the full infrastructure resources are ready."
+      - name: Resolve deployment coordinates
+        run: |
+          set -Eeuo pipefail
+
+          account_id="$(aws sts get-caller-identity --query Account --output text)"
+          tofu_state_bucket="cvs-challenge-pr-concierge-tofu-state-${account_id}"
+          tofu_lock_table="pr-concierge-opentofu-lock-${TOFU_ENVIRONMENT}"
+          evaluations_table_name="${SERVICE_NAME}-evaluations-${TOFU_ENVIRONMENT}"
+
+          {
+            printf 'AWS_ACCOUNT_ID=%s\n' "$account_id"
+            printf 'TOFU_STATE_BUCKET=%s\n' "$tofu_state_bucket"
+            printf 'TOFU_LOCK_TABLE=%s\n' "$tofu_lock_table"
+            printf 'TOFU_STATE_REGION=%s\n' "$AWS_REGION"
+            printf 'EVALUATIONS_TABLE_NAME=%s\n' "$evaluations_table_name"
+          } >> "$GITHUB_ENV"
+
+      - name: Generate OpenTofu variable file
+        run: |
+          set -Eeuo pipefail
+
+          tofu_var_file="$RUNNER_TEMP/pr-concierge.auto.tfvars"
+
+          cat >"$tofu_var_file" <<EOF
+          aws_region  = "${AWS_REGION}"
+          environment = "${TOFU_ENVIRONMENT}"
+
+          service_name           = "${SERVICE_NAME}"
+          evaluations_table_name = "${EVALUATIONS_TABLE_NAME}"
+          EOF
+
+          printf 'TOFU_VAR_FILE=%s\n' "$tofu_var_file" >> "$GITHUB_ENV"
+
+      - name: Generate OpenTofu backend config file
+        run: |
+          set -Eeuo pipefail
+
+          tofu_backend_file="$RUNNER_TEMP/pr-concierge.s3.tfbackend"
+
+          cat >"$tofu_backend_file" <<EOF
+          bucket         = "${TOFU_STATE_BUCKET}"
+          key            = "${SERVICE_NAME}/${TOFU_ENVIRONMENT}/terraform.tfstate"
+          region         = "${TOFU_STATE_REGION}"
+          encrypt        = true
+          dynamodb_table = "${TOFU_LOCK_TABLE}"
+          EOF
+
+          printf 'TOFU_BACKEND_FILE=%s\n' "$tofu_backend_file" >> "$GITHUB_ENV"
+
+      - name: Bootstrap OpenTofu backend
+        env:
+          GITHUB_TOKEN: ${{ secrets.PR_CONCIERGE_GITHUB_TOKEN }}
+          GITHUB_WEBHOOK_SECRET: ${{ secrets.PR_CONCIERGE_WEBHOOK_SECRET }}
+        run: ./scripts/bootstrap-tofu-backend.sh
+
+      - name: Deploy stack to AWS
+        env:
+          GITHUB_TOKEN: ${{ secrets.PR_CONCIERGE_GITHUB_TOKEN }}
+          GITHUB_WEBHOOK_SECRET: ${{ secrets.PR_CONCIERGE_WEBHOOK_SECRET }}
+        run: ./scripts/deploy.sh
+
+      - name: Smoke test deployed health endpoint
+        run: ./scripts/smoke-test.sh
+
+      - name: Run safe deployed integration tests
+        env:
+          DEPLOYED_WEBHOOK_SECRET: ${{ secrets.PR_CONCIERGE_WEBHOOK_SECRET }}
+        run: npm run test:integration:deployed
+
+      - name: Upload deployment summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-summary
+          path: .artifacts/*.json
+          if-no-files-found: warn

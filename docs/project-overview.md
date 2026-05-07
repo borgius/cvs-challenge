@@ -10,7 +10,7 @@ This project is intentionally small. The goal is to ship a clean MVP in about 3 
 ## Why this project fits the challenge
 
 - It supports a real developer workflow.
-- It can be deployed with Terraform and GitHub Actions.
+- It can be deployed with OpenTofu and GitHub Actions.
 - It is easy to expose with API Gateway.
 - It uses AWS-native observability.
 - It has a clean path to AI assistance without making AI the core dependency.
@@ -52,7 +52,7 @@ The MVP should include:
 - Structured JSON logging
 - CloudWatch alarm for Lambda errors
 - SNS topic for alarm notifications
-- Terraform modules and GitHub Actions deploy flow
+- Bash deployment scripts that package the Lambda artifact and drive the AWS footprint through OpenTofu
 
 ## Stretch scope
 
@@ -75,8 +75,8 @@ Main components:
 - Optional S3 bucket for raw payload archive
 - CloudWatch logs, metrics, and alarms
 - SNS topic for alert delivery
-- GitHub Actions with AWS OIDC for CI/CD
-- Terraform for all AWS resources
+- GitHub Actions for repo validation and AWS deployment
+- Bash deployment scripts that drive one-time backend bootstrap plus OpenTofu packaging, apply, and destroy flows
 
 ## Key design choices
 
@@ -96,6 +96,11 @@ The first version should be deterministic. AI can improve summaries later, but t
 
 The deployed runtime should be standard AWS Lambda Node.js 20.
 This repo already uses Bun for local scripts, so Bun can still be used for local install, build, and test commands if helpful. The final artifact should still target Node.js 20 for AWS.
+
+### Bash entrypoints over direct OpenTofu commands
+
+For this repository, the operator entrypoint stays in Bash scripts, but the scripts call OpenTofu rather than imperative AWS CLI provisioning commands.
+That preserves a simple deploy experience while keeping the infrastructure declarative and reviewable.
 
 ## Data model
 
@@ -151,7 +156,7 @@ Optional runtime AI:
 
 A good demo should show:
 
-1. Terraform plan or deployed stack screenshot
+1. OpenTofu plan or deployed stack screenshot
 2. GitHub webhook hitting the service
 3. Evaluation saved in DynamoDB
 4. Logs in CloudWatch

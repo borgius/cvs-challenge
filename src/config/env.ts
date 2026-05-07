@@ -1,3 +1,5 @@
+export type EvaluationRepositoryMode = 'console' | 'dynamodb';
+
 export interface AppConfig {
   awsRegion: string;
   githubWebhookSecret: string;
@@ -6,6 +8,7 @@ export interface AppConfig {
   rawEventBucketName: string | undefined;
   enableRawEventArchive: boolean;
   requiredLabels: string[];
+  evaluationRepository: EvaluationRepositoryMode;
 }
 
 const getRequiredEnv = (name: string): string => {
@@ -31,6 +34,24 @@ const parseCsv = (value: string | undefined): string[] =>
     .map((item) => item.trim())
     .filter(Boolean) ?? [];
 
+const parseEvaluationRepository = (
+  value: string | undefined,
+): EvaluationRepositoryMode => {
+  const normalizedValue = value?.trim().toLowerCase();
+
+  if (!normalizedValue || normalizedValue === 'console') {
+    return 'console';
+  }
+
+  if (normalizedValue === 'dynamodb') {
+    return 'dynamodb';
+  }
+
+  throw new Error(
+    `Invalid EVALUATION_REPOSITORY value '${value}'. Use 'console' or 'dynamodb'.`,
+  );
+};
+
 export const loadAppConfig = (): AppConfig => ({
   awsRegion: process.env.AWS_REGION?.trim() || 'us-east-1',
   githubWebhookSecret: getRequiredEnv('GITHUB_WEBHOOK_SECRET'),
@@ -39,4 +60,5 @@ export const loadAppConfig = (): AppConfig => ({
   rawEventBucketName: getOptionalEnv('RAW_EVENT_BUCKET_NAME'),
   enableRawEventArchive: parseBoolean(process.env.ENABLE_RAW_EVENT_ARCHIVE),
   requiredLabels: parseCsv(process.env.REQUIRED_LABELS),
+  evaluationRepository: parseEvaluationRepository(process.env.EVALUATION_REPOSITORY),
 });

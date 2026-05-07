@@ -1,0 +1,55 @@
+# Copy this file to infra/terraform/env/dev.auto.tfvars and edit it for your
+# environment. Keep the real *.auto.tfvars file local and untracked.
+#
+# This file is for non-secret root module inputs only.
+# Keep AWS credentials out of tfvars files and backend files.
+# Keep application secrets out of this file too; the deploy and destroy scripts
+# pass those through TF_VAR_github_webhook_secret and TF_VAR_github_token.
+
+aws_region  = "us-east-1"
+environment = "dev"
+
+service_name     = "pr-concierge"
+function_name    = null
+lambda_role_name = null
+api_name         = null
+alarm_topic_name = null
+
+# Optional provider safety rail. Leave empty to disable the account check.
+allowed_account_ids = []
+
+aws_lambda_runtime                 = "nodejs20.x"
+aws_lambda_handler                 = "dist/index.handler"
+aws_lambda_timeout                 = 30
+aws_lambda_memory_size             = 256
+lambda_architectures               = ["x86_64"]
+lambda_log_retention_in_days       = 14
+api_stage_name                     = "$default"
+api_access_log_retention_in_days   = 14
+api_integration_timeout_milliseconds = 29000
+
+evaluations_table_name   = "pr-concierge-evaluations"
+raw_event_bucket_name    = null
+enable_raw_event_archive = false
+required_labels          = ""
+
+# The root module already defaults the deployed Lambda to DynamoDB-backed
+# persistence, so evaluation_repository is optional here unless you want to
+# override it explicitly.
+# evaluation_repository = "dynamodb"
+
+dynamodb_point_in_time_recovery_enabled = true
+dynamodb_deletion_protection_enabled    = false
+dynamodb_server_side_encryption_enabled = true
+raw_event_bucket_force_destroy          = false
+raw_event_bucket_versioning_enabled     = true
+
+alarm_email_subscriptions        = []
+lambda_errors_threshold          = 1
+lambda_errors_evaluation_periods = 1
+lambda_errors_period_seconds     = 60
+api_5xx_threshold                = 1
+api_5xx_evaluation_periods       = 1
+api_5xx_period_seconds           = 60
+
+tags = {}

@@ -32,9 +32,10 @@ Important: the planning docs are slightly ahead of the implementation. For examp
 - `src/risk/classifier.ts` — deterministic risk classification rules
 - `src/storage/evaluationRepository.ts` — persistence interface and placeholder repository
 - `src/types/` — shared domain and GitHub payload types
-- `infra/terraform/` — starter Terraform configuration
+- `infra/bootstrap/tofu-backend/` — one-time backend bootstrap root for the OpenTofu S3 bucket and DynamoDB lock table
+- `infra/terraform/` — OpenTofu root and local wrapper modules for the AWS footprint
 - `docs/` — product, build-plan, and multi-agent planning notes
-- `.github/workflows/` — CI and deploy-readiness workflows
+- `.github/workflows/` — CI and deployment workflows
 - `dist/` — generated build output; do not edit by hand
 
 ## Setup commands
@@ -44,9 +45,13 @@ Use `npm` in this repository. The lockfile is `package-lock.json`.
 - Install dependencies: `npm install`
 - Build the app: `npm run build`
 - Type-check only: `npm run typecheck`
-- Run the current test command: `npm run test`
+- Type-check the Vitest harness: `npm run typecheck:tests`
+- Run the default local verification command: `npm run test`
+- Run only the local Lambda integration suite: `npm run test:integration:local`
+- Run the deployed HTTP API integration suite: `npm run test:integration:deployed`
 - Start the local development server: `npm run dev`
 - Start the compiled build: `npm start`
+- Configure this repository's managed `pull_request` webhook explicitly after deploy: `bash scripts/configure-self-webhook.sh`
 
 Local development is most reliable on the same major Node version used in CI. The workflows use Node.js 22. The project docs still target AWS Lambda Node.js 20 for deployment, so keep runtime code compatible with Lambda expectations.
 
@@ -54,20 +59,36 @@ Local development is most reliable on the same major Node version used in CI. Th
 
 Use `.env.example` as the canonical template. `.env` is gitignored.
 
-Variables currently defined by the repo:
+Keep `.env` focused on app runtime values and the small set of deployment secrets that still become Lambda environment variables:
 
-- `GITHUB_WEBHOOK_SECRET` — required for webhook signature validation
-- `GITHUB_TOKEN` — required for GitHub API file lookups
+- `GITHUB_WEBHOOK_SECRET` — required for webhook signature validation and reused by `scripts/configure-self-webhook.sh` when the repository explicitly manages its own webhook
+- `GITHUB_TOKEN` — required for GitHub API file lookups in the Lambda runtime; do not reuse it as the repository-admin token for webhook management
 - `AWS_REGION` — optional, defaults to `us-east-1`
 - `EVALUATIONS_TABLE_NAME` — required by `loadAppConfig()`
 - `RAW_EVENT_BUCKET_NAME` — optional
 - `ENABLE_RAW_EVENT_ARCHIVE` — optional boolean flag
 - `REQUIRED_LABELS` — optional comma-separated labels
+- `EVALUATION_REPOSITORY` — optional local runtime override
+
+Do not use `.env` as the home for ordinary OpenTofu root variables. Copy `infra/terraform/env/dev.auto.tfvars.example` to `infra/terraform/env/dev.auto.tfvars` and keep non-secret root variables there instead. Copy `infra/terraform/backend/dev.s3.tfbackend.example` to `infra/terraform/backend/dev.s3.tfbackend` and keep backend coordinates there.
+
+For the one-time backend bootstrap script, `.env` or the shell may also provide:
+
+- `TOFU_STATE_BUCKET`
+- `TOFU_LOCK_TABLE`
+- `TOFU_STATE_REGION`
+- `TOFU_STATE_BUCKET_FORCE_DESTROY`
+- `TOFU_STATE_BUCKET_VERSIONING_ENABLED`
+- `TOFU_LOCK_TABLE_POINT_IN_TIME_RECOVERY_ENABLED`
+- `TOFU_LOCK_TABLE_DELETION_PROTECTION_ENABLED`
+
+Supported AWS authentication paths are the standard AWS credential-chain options such as `AWS_PROFILE`, `aws sso login`, shared-config assume-role, and OIDC/web identity. Do not add AWS credentials to `.env`, `*.auto.tfvars`, or `*.s3.tfbackend` files.
 
 Notes:
 
 - `GET /health` can run without the required webhook secrets because config loading happens inside the webhook handler.
 - `POST /webhooks/github` will fail at runtime if required environment variables are missing.
+- `scripts/configure-self-webhook.sh` expects the same `GITHUB_WEBHOOK_SECRET`, but it uses a separate GitHub operator-auth lane: either `gh auth login` as a repository admin or `GH_TOKEN` with `Webhooks: write`.
 - Never commit real secrets, personal identifiers, or live cloud resource IDs. Use placeholders in docs and examples.
 
 ## Development workflow
@@ -82,25 +103,36 @@ Notes:
   - persistence behind `src/storage/`
 - Edit source files in `src/`, then rebuild; do not hand-edit `dist/`.
 - Keep docs honest. The repo intentionally contains roadmap material, so if you implement or remove a feature, update the relevant docs.
+- Keep the self-hook flow explicit. `scripts/deploy.sh` stays focused on AWS packaging and OpenTofu apply, while `scripts/configure-self-webhook.sh` is the separate operator step that mutates repository webhook settings.
 
 ## Testing and verification
 
-At the moment, there is no dedicated unit or integration test runner in the repo.
-`npm run test` currently delegates to `npm run typecheck`.
+The repo now uses Vitest for integration coverage.
+`npm run test` type-checks the production source, type-checks the Vitest harness, and runs the local Lambda integration suite.
+`npm run test:integration:deployed` runs the deployed HTTP API suite and expects either `DEPLOYED_HEALTH_URL` / `DEPLOYED_WEBHOOK_URL` or `.artifacts/<service>-deployment.json`.
+The deployed suite keeps its default checks safe by covering `GET /health`, empty-body webhook rejection, and invalid-signature rejection. A real deployed webhook success-path case is opt-in and skipped unless `DEPLOYED_WEBHOOK_SECRET`, `DEPLOYED_PR_REPOSITORY`, and `DEPLOYED_PR_NUMBER` are set.
+
+Self-dogfooding notes:
+
+- The repo starts with zero GitHub repository webhooks. After deploy, run `bash scripts/configure-self-webhook.sh` explicitly if you want this repository to send its own `pull_request` events to the deployed PR Concierge endpoint.
+- That script writes `.artifacts/<service>-github-webhook.json` with the managed hook ID and GitHub API links for ping and delivery inspection.
+- Use the script's ping plus recent-deliveries guidance for configuration verification, then optionally reuse `npm run test:integration:deployed` with the live webhook env vars for a full PR-level proof.
 
 Commands verified in this repository:
 
 - `npm run build`
 - `npm run test`
-- `terraform fmt -check`
-- `terraform init -backend=false`
-- `terraform validate`
+- `npm run test:integration:deployed`
+- `tofu fmt -check`
+- `tofu init -backend=false -input=false`
+- `tofu validate`
 
-Infrastructure commands should be run from `infra/terraform`.
+Infrastructure commands should be run from `infra/terraform` for the app stack and `infra/bootstrap/tofu-backend` for backend bootstrap work.
 
 If you add tests:
 
 - Prefer `*.spec.ts` files or a `tests/` directory; the risk classifier already treats those locations as test-only changes.
+- Keep integration coverage under `tests/integration/` and prefer the exported Lambda `handler` for local verification.
 - Keep tests focused on changed behavior.
 - Update `package.json` scripts and this file if you introduce a real test runner.
 
@@ -119,20 +151,36 @@ Before finishing a change, run the relevant app checks plus any targeted tests y
 
 ## Infrastructure and deployment notes
 
-Terraform currently provides a starter configuration, not a full AWS resource graph.
-The checked-in Terraform defines provider setup, variables, shared tags, and outputs. It does not yet provision the full planned API Gateway, Lambda, DynamoDB, SNS, and S3 footprint described in the docs.
+`infra/terraform` now defines the active AWS footprint for PR Concierge through OpenTofu, including the Lambda function, HTTP API, DynamoDB table, optional S3 bucket, SNS topic, and CloudWatch alarms.
 
-Likewise, the GitHub Actions workflows are currently validation/readiness workflows:
+The root uses an S3 backend configured at init time, with DynamoDB used for state locking. The steady-state deploy and destroy scripts read backend coordinates from `infra/terraform/backend/<env>.s3.tfbackend` and non-secret root variables from `infra/terraform/env/<env>.auto.tfvars`.
 
-- `.github/workflows/ci.yml` runs install, build, and type-check on push and pull request
-- `.github/workflows/deploy.yml` runs build plus Terraform format/init/validate and prints a deployment note
+The deploy and destroy scripts reserve `TF_VAR_...` for the remaining GitHub secrets that still enter managed resources. AWS credentials stay on the AWS credential chain rather than in repo-local config files.
 
-Do not describe deployment as fully automated unless you also add the missing plan/apply or packaging steps.
+`scripts/deploy.sh` imports the Lambda function, IAM role, and Lambda log group into OpenTofu state when those resources already exist from an earlier manual or partially managed deployment.
+
+The one-time backend bootstrap path lives in `infra/bootstrap/tofu-backend/` and is wrapped by `scripts/bootstrap-tofu-backend.sh`. That root keeps local state on purpose so it can create the remote backend resources for the main stack.
+
+The GitHub Actions workflows are:
+
+- `.github/workflows/ci.yml` runs install, build, and the default test workflow on push and pull request
+- `.github/workflows/deploy.yml` runs install, build, the default test workflow, OpenTofu format/init/validate, authenticates to AWS with GitHub OIDC, bootstraps the OpenTofu backend if needed, deploys with `scripts/deploy.sh`, and then runs smoke plus safe deployed integration tests
+
+Repository secrets required by `.github/workflows/deploy.yml`:
+
+- `AWS_DEPLOY_ROLE_ARN`
+- `PR_CONCIERGE_GITHUB_TOKEN`
+- `PR_CONCIERGE_WEBHOOK_SECRET`
+
+The workflow deploy path intentionally still runs through `scripts/bootstrap-tofu-backend.sh` and `scripts/deploy.sh`, so workflow changes should continue to keep those scripts as the source of truth.
 
 ## Security considerations
 
 - Preserve GitHub webhook signature validation in `src/github/signature.ts` and `src/app.ts`.
 - Keep secrets in `.env` locally and in secret managers or CI configuration remotely.
+- Keep GitHub repository-admin auth for webhook management separate from the Lambda runtime `GITHUB_TOKEN`. Use GitHub CLI auth or a dedicated `GH_TOKEN` when running `scripts/configure-self-webhook.sh`.
+- Keep AWS provider and backend credentials out of `.env`, `*.auto.tfvars`, and `*.s3.tfbackend` files. Use the AWS credential chain instead.
+- Remember that the GitHub secrets still land in OpenTofu state today because the Lambda resource persists them as environment variables. Protect the backend bucket and lock table accordingly.
 - If you add AWS integrations, document the required IAM permissions and environment variables.
 - Prefer least-privilege changes in Terraform and keep security-sensitive behavior explicit and reviewable.
 
@@ -140,8 +188,9 @@ Do not describe deployment as fully automated unless you also add the missing pl
 
 Be careful not to confuse planned architecture with shipped behavior:
 
-- The docs describe DynamoDB-backed persistence, but the current application still uses `ConsoleEvaluationRepository`, which logs the evaluation instead of storing it remotely.
+- The deployed path can use DynamoDB-backed persistence, but local development often still uses `EVALUATION_REPOSITORY=console` to avoid requiring AWS resources.
 - The docs describe optional raw event archiving, but the app currently only computes an S3 key placeholder when the feature flag is enabled.
+- `required_labels` is empty by default. If an operator enables required labels later, they must create the matching GitHub labels separately; the basic self-hook flow does not bootstrap labels.
 - Some planning docs describe paths that no longer exist. The code in `src/` is authoritative.
 
 ## Pull request expectations

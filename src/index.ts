@@ -3,6 +3,7 @@ import { handle } from 'hono/aws-lambda';
 import { pathToFileURL } from 'node:url';
 
 import { app } from './app.ts';
+import { logger } from './utils/logger.ts';
 
 export { app } from './app.ts';
 
@@ -18,41 +19,14 @@ if (entrypointUrl && import.meta.url === entrypointUrl) {
     port,
   });
 
-  console.log(
-    JSON.stringify({
-      timestamp: new Date().toISOString(),
-      level: 'INFO',
-      message: 'PR Concierge Hono server started',
-      port,
-      routes: ['GET /health', 'POST /webhooks/github'],
-    }),
-  );
+  logger.info('PR Concierge Hono server started', { port, routes: ['GET /health', 'POST /webhooks/github'] });
 
   const shutdown = (signal: NodeJS.Signals): void => {
-    console.log(
-      JSON.stringify({
-        timestamp: new Date().toISOString(),
-        level: 'INFO',
-        message: 'PR Concierge Hono server stopping',
-        signal,
-      }),
-    );
+    logger.info('PR Concierge Hono server stopping', { signal });
 
     server.close((error) => {
       if (error) {
-        console.error(
-          JSON.stringify({
-            timestamp: new Date().toISOString(),
-            level: 'ERROR',
-            message: 'Failed to stop PR Concierge Hono server cleanly',
-            signal,
-            error: {
-              name: error.name,
-              message: error.message,
-              stack: error.stack,
-            },
-          }),
-        );
+        logger.error('Failed to stop PR Concierge Hono server cleanly', { signal, error: { name: error.name, message: error.message, stack: error.stack } });
         process.exit(1);
       }
 
