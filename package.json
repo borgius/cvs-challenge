@@ -1,0 +1,31 @@
+{
+  "name": "pr-concierge",
+  "version": "0.1.0",
+  "description": "PR Concierge Lambda scaffold for pull request hygiene and release awareness",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run typecheck",
+    "dev": "node --watch src/index.ts",
+    "start": "node dist/index.js"
+  },
+  "keywords": [
+    "aws-lambda",
+    "github-webhooks",
+    "typescript",
+    "platform-engineering"
+  ],
+  "license": "ISC",
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.161",
+    "@types/node": "^25.6.1",
+    "typescript": "^6.0.3"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.0.1",
+    "hono": "^4.12.18"
+  }
+}

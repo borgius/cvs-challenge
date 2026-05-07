@@ -1,0 +1,8 @@
+.hypergrep/
+node_modules/
+dist/
+.env
+.terraform/
+*.tfstate
+*.tfstate.*
+.DS_Store
