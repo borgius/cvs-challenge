@@ -51,6 +51,7 @@ Use `npm` in this repository. The lockfile is `package-lock.json`.
 - Run the deployed HTTP API integration suite: `npm run test:integration:deployed`
 - Start the local development server: `npm run dev`
 - Start the compiled build: `npm start`
+- Configure this repository's managed `pull_request` webhook explicitly after deploy: `bash scripts/configure-self-webhook.sh`
 
 Local development is most reliable on the same major Node version used in CI. The workflows use Node.js 22. The project docs still target AWS Lambda Node.js 20 for deployment, so keep runtime code compatible with Lambda expectations.
 
@@ -60,8 +61,8 @@ Use `.env.example` as the canonical template. `.env` is gitignored.
 
 Keep `.env` focused on app runtime values and the small set of deployment secrets that still become Lambda environment variables:
 
-- `GITHUB_WEBHOOK_SECRET` — required for webhook signature validation
-- `GITHUB_TOKEN` — required for GitHub API file lookups
+- `GITHUB_WEBHOOK_SECRET` — required for webhook signature validation and reused by `scripts/configure-self-webhook.sh` when the repository explicitly manages its own webhook
+- `GITHUB_TOKEN` — required for GitHub API file lookups in the Lambda runtime; do not reuse it as the repository-admin token for webhook management
 - `AWS_REGION` — optional, defaults to `us-east-1`
 - `EVALUATIONS_TABLE_NAME` — required by `loadAppConfig()`
 - `RAW_EVENT_BUCKET_NAME` — optional
@@ -87,6 +88,7 @@ Notes:
 
 - `GET /health` can run without the required webhook secrets because config loading happens inside the webhook handler.
 - `POST /webhooks/github` will fail at runtime if required environment variables are missing.
+- `scripts/configure-self-webhook.sh` expects the same `GITHUB_WEBHOOK_SECRET`, but it uses a separate GitHub operator-auth lane: either `gh auth login` as a repository admin or `GH_TOKEN` with `Webhooks: write`.
 - Never commit real secrets, personal identifiers, or live cloud resource IDs. Use placeholders in docs and examples.
 
 ## Development workflow
@@ -101,6 +103,7 @@ Notes:
   - persistence behind `src/storage/`
 - Edit source files in `src/`, then rebuild; do not hand-edit `dist/`.
 - Keep docs honest. The repo intentionally contains roadmap material, so if you implement or remove a feature, update the relevant docs.
+- Keep the self-hook flow explicit. `scripts/deploy.sh` stays focused on AWS packaging and OpenTofu apply, while `scripts/configure-self-webhook.sh` is the separate operator step that mutates repository webhook settings.
 
 ## Testing and verification
 
@@ -108,6 +111,12 @@ The repo now uses Vitest for integration coverage.
 `npm run test` type-checks the production source, type-checks the Vitest harness, and runs the local Lambda integration suite.
 `npm run test:integration:deployed` runs the deployed HTTP API suite and expects either `DEPLOYED_HEALTH_URL` / `DEPLOYED_WEBHOOK_URL` or `.artifacts/<service>-deployment.json`.
 The deployed suite keeps its default checks safe by covering `GET /health`, empty-body webhook rejection, and invalid-signature rejection. A real deployed webhook success-path case is opt-in and skipped unless `DEPLOYED_WEBHOOK_SECRET`, `DEPLOYED_PR_REPOSITORY`, and `DEPLOYED_PR_NUMBER` are set.
+
+Self-dogfooding notes:
+
+- The repo starts with zero GitHub repository webhooks. After deploy, run `bash scripts/configure-self-webhook.sh` explicitly if you want this repository to send its own `pull_request` events to the deployed PR Concierge endpoint.
+- That script writes `.artifacts/<service>-github-webhook.json` with the managed hook ID and GitHub API links for ping and delivery inspection.
+- Use the script's ping plus recent-deliveries guidance for configuration verification, then optionally reuse `npm run test:integration:deployed` with the live webhook env vars for a full PR-level proof.
 
 Commands verified in this repository:
 
@@ -148,6 +157,8 @@ The root uses an S3 backend configured at init time, with DynamoDB used for stat
 
 The deploy and destroy scripts reserve `TF_VAR_...` for the remaining GitHub secrets that still enter managed resources. AWS credentials stay on the AWS credential chain rather than in repo-local config files.
 
+`scripts/deploy.sh` imports the Lambda function, IAM role, and Lambda log group into OpenTofu state when those resources already exist from an earlier manual or partially managed deployment.
+
 The one-time backend bootstrap path lives in `infra/bootstrap/tofu-backend/` and is wrapped by `scripts/bootstrap-tofu-backend.sh`. That root keeps local state on purpose so it can create the remote backend resources for the main stack.
 
 The GitHub Actions workflows are:
@@ -167,6 +178,7 @@ The workflow deploy path intentionally still runs through `scripts/bootstrap-tof
 
 - Preserve GitHub webhook signature validation in `src/github/signature.ts` and `src/app.ts`.
 - Keep secrets in `.env` locally and in secret managers or CI configuration remotely.
+- Keep GitHub repository-admin auth for webhook management separate from the Lambda runtime `GITHUB_TOKEN`. Use GitHub CLI auth or a dedicated `GH_TOKEN` when running `scripts/configure-self-webhook.sh`.
 - Keep AWS provider and backend credentials out of `.env`, `*.auto.tfvars`, and `*.s3.tfbackend` files. Use the AWS credential chain instead.
 - Remember that the GitHub secrets still land in OpenTofu state today because the Lambda resource persists them as environment variables. Protect the backend bucket and lock table accordingly.
 - If you add AWS integrations, document the required IAM permissions and environment variables.
@@ -178,6 +190,7 @@ Be careful not to confuse planned architecture with shipped behavior:
 
 - The deployed path can use DynamoDB-backed persistence, but local development often still uses `EVALUATION_REPOSITORY=console` to avoid requiring AWS resources.
 - The docs describe optional raw event archiving, but the app currently only computes an S3 key placeholder when the feature flag is enabled.
+- `required_labels` is empty by default. If an operator enables required labels later, they must create the matching GitHub labels separately; the basic self-hook flow does not bootstrap labels.
 - Some planning docs describe paths that no longer exist. The code in `src/` is authoritative.
 
 ## Pull request expectations

@@ -77,8 +77,8 @@ Keep `.env` for application runtime values and the small set of deployment secre
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
-| `GITHUB_WEBHOOK_SECRET` | Yes | Validates the `x-hub-signature-256` header from GitHub and feeds `TF_VAR_github_webhook_secret` during deploy and destroy if you do not export it directly |
-| `GITHUB_TOKEN` | Yes | Reads changed files from the GitHub REST API and feeds `TF_VAR_github_token` during deploy and destroy if you do not export it directly |
+| `GITHUB_WEBHOOK_SECRET` | Yes | Validates the `x-hub-signature-256` header from GitHub, feeds `TF_VAR_github_webhook_secret` during deploy and destroy if you do not export it directly, and is reused by `scripts/configure-self-webhook.sh` when you explicitly configure this repository's managed webhook |
+| `GITHUB_TOKEN` | Yes | Reads changed files from the GitHub REST API and feeds `TF_VAR_github_token` during deploy and destroy if you do not export it directly; it stays on the Lambda runtime lane and is not the repository-admin token for webhook management |
 | `AWS_REGION` | No | Default AWS region for the local app and AWS SDK clients |
 | `EVALUATIONS_TABLE_NAME` | Yes | Target DynamoDB table name for the app runtime |
 | `RAW_EVENT_BUCKET_NAME` | No | Optional S3 bucket name for raw webhook archiving |
@@ -137,9 +137,71 @@ Scripts:
 
 - `scripts/bootstrap-tofu-backend.sh` — creates or imports the S3 bucket and DynamoDB lock table used by the OpenTofu backend
 - `scripts/package-lambda.sh` — builds the app and creates a Lambda zip in `.artifacts/`
-- `scripts/deploy.sh` — packages the app, reads the local `*.auto.tfvars` and `*.s3.tfbackend` files, runs `tofu init`, runs `tofu apply`, and writes `.artifacts/<service>-deployment.json`
+- `scripts/deploy.sh` — packages the app, reads the local `*.auto.tfvars` and `*.s3.tfbackend` files, imports pre-existing Lambda-side resources into OpenTofu state when needed, runs `tofu init`, runs `tofu apply`, and writes `.artifacts/<service>-deployment.json`
+- `scripts/configure-self-webhook.sh` — explicitly creates or updates this repository's managed `pull_request` webhook from `.artifacts/<service>-deployment.json` and writes `.artifacts/<service>-github-webhook.json`
 - `scripts/smoke-test.sh` — calls the deployed `GET /health` endpoint
 - `scripts/destroy.sh` — reads the same local `*.auto.tfvars` and `*.s3.tfbackend` files, then runs targeted `tofu destroy` by default to preserve DynamoDB and S3 data; set `DELETE_DATA=true` for a full stack destroy
+
+## Self-PR Concierge webhook configuration
+
+Deploying the AWS stack does not configure GitHub repository settings for you.
+This repository starts with zero webhooks, so the self-dogfooding step is an
+explicit follow-up after `scripts/deploy.sh` succeeds.
+
+Prerequisites:
+
+- a successful deploy that wrote `.artifacts/<service>-deployment.json`
+- a real `GITHUB_WEBHOOK_SECRET` value in `.env` or the shell
+- `gh`, `git`, and `jq`
+- GitHub repository-admin auth through either `gh auth login` or `GH_TOKEN` from a fine-grained token with `Webhooks: write`
+
+The script intentionally keeps GitHub repository-admin auth separate from the
+Lambda runtime `GITHUB_TOKEN`. It reuses the deployed `webhookUrl` from
+`.artifacts/<service>-deployment.json`, configures only the `pull_request`
+event, and always includes the secret on update so GitHub does not clear it.
+
+Try it:
+
+```bash
+gh auth login
+bash scripts/configure-self-webhook.sh
+```
+
+If you prefer an explicit token for the operator lane, export `GH_TOKEN` before
+running the script. Do not rely on `GITHUB_TOKEN` for this step.
+
+What the script writes locally:
+
+- `.artifacts/<service>-github-webhook.json` — the managed hook ID, repository slug, target URL, and GitHub API links for ping and delivery inspection
+
+What the script verifies:
+
+- on create, GitHub automatically sends a `ping` event
+- on update, the script sends a follow-up ping unless you pass `--skip-ping`
+- the script prints recent delivery summaries when GitHub has them available
+
+For deeper inspection, use the commands that the script prints or run these
+yourself:
+
+```bash
+gh api "repos/OWNER/REPO/hooks/HOOK_ID/deliveries?per_page=10" --jq '.[] | {id, event, action, status, status_code, delivered_at}'
+gh api "repos/OWNER/REPO/hooks/HOOK_ID/deliveries/DELIVERY_ID"
+```
+
+For a full PR-level proof, reuse the existing deployed success-path integration
+test after the webhook is configured:
+
+```bash
+export DEPLOYED_WEBHOOK_SECRET=<same-secret>
+export DEPLOYED_PR_REPOSITORY=OWNER/REPO
+export DEPLOYED_PR_NUMBER=<pr-number>
+npm run test:integration:deployed
+```
+
+If you later set `required_labels` in `infra/terraform/env/<env>.auto.tfvars`,
+create the matching GitHub labels separately. Label setup is optional while
+`required_labels` is empty by default, and it is intentionally not bundled into
+the basic self-hook flow.
 
 ## GitHub Actions deployment
 
@@ -162,6 +224,7 @@ Notes:
 
 - The deploy script still forces the Lambda environment to use DynamoDB persistence through the root module defaults.
 - The backend bootstrap script uses a separate local-state root because OpenTofu cannot create the backend it is currently using.
+- The deploy script imports the Lambda function, IAM role, and Lambda log group into OpenTofu state when those resources already exist from an earlier manual or partially managed deployment.
 - The deploy and destroy scripts stop early with a clear error if `tofu` is not installed or if the local tfvars and backend files are missing.
 - The scripts keep AWS credentials on the AWS credential chain. Do not put AWS access keys, session tokens, or profile secrets in `.env`, `*.auto.tfvars`, or `*.s3.tfbackend` files.
 - The root OpenTofu module emits a `deployment_summary` output, and `scripts/deploy.sh` persists it to `.artifacts/<service>-deployment.json` for operators and follow-on scripts.
