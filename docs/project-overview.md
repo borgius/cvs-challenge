@@ -75,7 +75,7 @@ Main components:
 - Optional S3 bucket for raw payload archive
 - CloudWatch logs, metrics, and alarms
 - SNS topic for alert delivery
-- GitHub Actions for repo validation
+- GitHub Actions for repo validation and AWS deployment
 - Bash deployment scripts that drive one-time backend bootstrap plus OpenTofu packaging, apply, and destroy flows
 
 ## Key design choices

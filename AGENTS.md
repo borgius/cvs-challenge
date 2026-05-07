@@ -35,7 +35,7 @@ Important: the planning docs are slightly ahead of the implementation. For examp
 - `infra/bootstrap/tofu-backend/` — one-time backend bootstrap root for the OpenTofu S3 bucket and DynamoDB lock table
 - `infra/terraform/` — OpenTofu root and local wrapper modules for the AWS footprint
 - `docs/` — product, build-plan, and multi-agent planning notes
-- `.github/workflows/` — CI and deploy-readiness workflows
+- `.github/workflows/` — CI and deployment workflows
 - `dist/` — generated build output; do not edit by hand
 
 ## Setup commands
@@ -150,12 +150,18 @@ The deploy and destroy scripts reserve `TF_VAR_...` for the remaining GitHub sec
 
 The one-time backend bootstrap path lives in `infra/bootstrap/tofu-backend/` and is wrapped by `scripts/bootstrap-tofu-backend.sh`. That root keeps local state on purpose so it can create the remote backend resources for the main stack.
 
-The GitHub Actions workflows are still validation/readiness workflows:
+The GitHub Actions workflows are:
 
 - `.github/workflows/ci.yml` runs install, build, and the default test workflow on push and pull request
-- `.github/workflows/deploy.yml` runs build plus OpenTofu format/init/validate and prints a deployment note
+- `.github/workflows/deploy.yml` runs install, build, the default test workflow, OpenTofu format/init/validate, authenticates to AWS with GitHub OIDC, bootstraps the OpenTofu backend if needed, deploys with `scripts/deploy.sh`, and then runs smoke plus safe deployed integration tests
 
-Do not describe deployment as fully automated unless you also add the missing CI-side plan/apply or packaging steps. Today the supported operator path still runs through `scripts/deploy.sh` and `scripts/destroy.sh`.
+Repository secrets required by `.github/workflows/deploy.yml`:
+
+- `AWS_DEPLOY_ROLE_ARN`
+- `PR_CONCIERGE_GITHUB_TOKEN`
+- `PR_CONCIERGE_WEBHOOK_SECRET`
+
+The workflow deploy path intentionally still runs through `scripts/bootstrap-tofu-backend.sh` and `scripts/deploy.sh`, so workflow changes should continue to keep those scripts as the source of truth.
 
 ## Security considerations
 

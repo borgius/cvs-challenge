@@ -19,7 +19,7 @@ The HTTP layer now runs on [Hono](https://hono.dev/) so the project uses Hono ro
 - a separate OpenTofu bootstrap root for the remote state bucket and DynamoDB lock table
 - deployment scripts in `scripts/` that bootstrap the backend once, package the Lambda artifact, and drive `tofu init`, `tofu apply`, and `tofu destroy`
 - Vitest integration suites for the local Lambda handler and the deployed HTTP API
-- GitHub Actions workflows that build, test, and validate the OpenTofu roots
+- GitHub Actions workflows that build, test, validate both OpenTofu roots, and deploy to AWS through the repository's Bash automation
 
 ## Quick start
 
@@ -141,6 +141,23 @@ Scripts:
 - `scripts/smoke-test.sh` — calls the deployed `GET /health` endpoint
 - `scripts/destroy.sh` — reads the same local `*.auto.tfvars` and `*.s3.tfbackend` files, then runs targeted `tofu destroy` by default to preserve DynamoDB and S3 data; set `DELETE_DATA=true` for a full stack destroy
 
+## GitHub Actions deployment
+
+`.github/workflows/deploy.yml` is the repository's CI/CD deploy path.
+On pushes to `main` and manual dispatches, it:
+
+- installs dependencies and runs `npm run build` plus `npm run test`
+- validates both OpenTofu roots before touching AWS
+- authenticates to AWS with GitHub OIDC
+- derives the OpenTofu backend bucket and lock-table names from the target AWS account ID
+- runs `scripts/bootstrap-tofu-backend.sh`, `scripts/deploy.sh`, `scripts/smoke-test.sh`, and the safe deployed integration suite
+
+Configure these GitHub Actions repository secrets before using that workflow:
+
+- `AWS_DEPLOY_ROLE_ARN` — IAM role ARN assumed by GitHub Actions through OIDC
+- `PR_CONCIERGE_GITHUB_TOKEN` — GitHub token injected into Lambda for changed-file lookups
+- `PR_CONCIERGE_WEBHOOK_SECRET` — webhook secret injected into Lambda and reused by optional deployed webhook tests
+
 Notes:
 
 - The deploy script still forces the Lambda environment to use DynamoDB persistence through the root module defaults.
@@ -164,13 +181,13 @@ Notes:
 - `scripts/` — backend bootstrap, packaging, deployment, smoke-test, and teardown scripts that wrap OpenTofu
 - `infra/bootstrap/tofu-backend/` — one-time backend bootstrap root for the remote state bucket and lock table
 - `infra/terraform/` — OpenTofu root and local wrapper modules for the AWS footprint
-- `.github/workflows/` — CI and deployment-readiness workflows
+- `.github/workflows/` — CI and deployment workflows
 
 ## What is intentionally still a placeholder
 
 This scaffold keeps the MVP foundation small and honest:
 
 - Raw event S3 archiving is still a placeholder and currently only generates the future object key, even though the optional archive bucket can now be provisioned.
-- GitHub Actions validate the repo and OpenTofu layout, but they do not apply infrastructure changes.
+- The default deployed test pass in GitHub Actions stays conservative: health, empty-body rejection, and invalid-signature rejection are always checked, while the live signed-webhook success path remains opt-in.
 
 That keeps the repo ready for the next implementation pass without overselling unfinished infrastructure. A little less smoke, a little more signal.
