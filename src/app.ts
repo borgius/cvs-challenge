@@ -13,6 +13,7 @@ import {
 import { fetchPullRequestFiles } from './github/client.ts';
 import {
   buildCompletedGitHubCheckOutput,
+  buildGitHubCheckBrandingImageUrl,
   buildFailedGitHubCheckOutput,
   buildGitHubCheckExternalId,
   completeGitHubCheckRun,
@@ -246,6 +247,12 @@ app.post('/webhooks/github', async (c) => {
       headSha,
       githubDeliveryId,
     );
+    const checkBrandingImageUrl = payload.repository.private
+      ? undefined
+      : buildGitHubCheckBrandingImageUrl(
+          payload.pull_request.head.repo?.full_name ?? repositoryFullName,
+          headSha,
+        );
     let checkRunId: number | undefined;
     let githubChecksToken: string | undefined;
 
@@ -260,6 +267,9 @@ app.post('/webhooks/github', async (c) => {
         githubToken: githubChecksToken,
         headSha,
         externalId: checkRunExternalId,
+        ...(checkBrandingImageUrl === undefined
+          ? {}
+          : { brandingImageUrl: checkBrandingImageUrl }),
       });
 
       checkRunId = createdCheckRun.id;
@@ -296,7 +306,7 @@ app.post('/webhooks/github', async (c) => {
         githubToken: githubChecksToken,
         checkRunId,
         conclusion: checkConclusion,
-        output: buildCompletedGitHubCheckOutput(evaluation),
+        output: buildCompletedGitHubCheckOutput(evaluation, checkBrandingImageUrl),
       });
 
       logger.info('Pull request evaluation completed', {
@@ -330,7 +340,7 @@ app.post('/webhooks/github', async (c) => {
             githubToken: githubChecksToken,
             checkRunId,
             conclusion: 'failure',
-            output: buildFailedGitHubCheckOutput(requestId),
+            output: buildFailedGitHubCheckOutput(requestId, checkBrandingImageUrl),
           });
         } catch (checkRunError) {
           logger.error('Failed to complete GitHub check run after webhook error', {

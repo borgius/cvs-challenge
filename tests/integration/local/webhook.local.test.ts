@@ -22,6 +22,9 @@ interface RecordedGitHubRequest {
   jsonBody: Record<string, unknown> | undefined;
 }
 
+const expectedCheckBrandingImageUrl =
+  'https://raw.githubusercontent.com/octo-org/pr-concierge/0123456789abcdef0123456789abcdef01234567/diagrams/assets/pr-concierge-check-icon.png';
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
@@ -109,6 +112,22 @@ const buildSuccessfulWebhookPayload = (
     login: 'octo-org',
   };
   payload.repository.name = 'pr-concierge';
+
+  const payloadRecord = payload as unknown as Record<string, unknown>;
+  const repository = payloadRecord.repository as Record<string, unknown>;
+  const pullRequest = payloadRecord.pull_request as Record<string, unknown>;
+  const head = pullRequest.head as Record<string, unknown>;
+  const base = pullRequest.base as Record<string, unknown>;
+  const headRepo = head.repo as Record<string, unknown>;
+  const baseRepo = base.repo as Record<string, unknown>;
+
+  repository.private = false;
+  headRepo.full_name = 'octo-org/pr-concierge';
+  headRepo.name = 'pr-concierge';
+  headRepo.private = false;
+  baseRepo.full_name = 'octo-org/pr-concierge';
+  baseRepo.name = 'pr-concierge';
+  baseRepo.private = false;
 
   return payload;
 };
@@ -621,6 +640,12 @@ describe('local Lambda webhook integration', () => {
       external_id: 'delivery-42',
       output: {
         title: 'PR Concierge is evaluating this pull request',
+        images: [
+          {
+            alt: 'PR Concierge branded check artwork',
+            image_url: expectedCheckBrandingImageUrl,
+          },
+        ],
       },
     });
     expect(filesLookupRequest.headers.get('authorization')).toBe(
@@ -635,6 +660,12 @@ describe('local Lambda webhook integration', () => {
       conclusion: 'success',
       output: {
         title: 'PR Concierge passed',
+        images: [
+          {
+            alt: 'PR Concierge branded check artwork',
+            image_url: expectedCheckBrandingImageUrl,
+          },
+        ],
       },
     });
     expect(checkRunUpdateRequest.jsonBody?.output).toMatchObject({

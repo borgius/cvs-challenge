@@ -1,8 +1,12 @@
 import type { CheckStatus, EvaluationCheck, EvaluationResult } from '../types/evaluation.ts';
-import { buildGitHubRepositoryApiUrl } from './repository.ts';
+import {
+  buildGitHubRepositoryApiUrl,
+  buildGitHubRepositoryRawContentUrl,
+} from './repository.ts';
 
 const githubApiVersion = '2022-11-28';
 const checkRunName = 'pr-concierge';
+const checkBrandingAssetPath = 'diagrams/assets/pr-concierge-check-icon.png';
 
 export type GitHubCheckRunConclusion =
   | 'action_required'
@@ -17,6 +21,13 @@ export interface GitHubCheckRunOutput {
   title: string;
   summary: string;
   text?: string;
+  images?: GitHubCheckRunImage[];
+}
+
+export interface GitHubCheckRunImage {
+  alt: string;
+  image_url: string;
+  caption?: string;
 }
 
 export interface CreateGitHubCheckRunInput {
@@ -24,6 +35,7 @@ export interface CreateGitHubCheckRunInput {
   githubToken: string;
   headSha: string;
   externalId: string;
+  brandingImageUrl?: string;
 }
 
 export interface CompleteGitHubCheckRunInput {
@@ -45,6 +57,28 @@ interface GitHubCheckStatusCounts {
   warn: number;
   skip: number;
 }
+
+const buildCheckRunImages = (
+  brandingImageUrl: string | undefined,
+): GitHubCheckRunImage[] | undefined =>
+  brandingImageUrl
+    ? [
+        {
+          alt: 'PR Concierge branded check artwork',
+          image_url: brandingImageUrl,
+          caption:
+            'PR Concierge saves the evaluation and publishes this GitHub check back to the pull request.',
+        },
+      ]
+    : undefined;
+
+const buildOptionalImagesProperty = (
+  brandingImageUrl: string | undefined,
+): Pick<GitHubCheckRunOutput, 'images'> | Record<string, never> => {
+  const images = buildCheckRunImages(brandingImageUrl);
+
+  return images === undefined ? {} : { images };
+};
 
 const buildGitHubHeaders = (githubToken: string): Record<string, string> => ({
   accept: 'application/vnd.github+json',
@@ -81,10 +115,13 @@ const requestGitHubCheckRun = async <T>(
   return (await response.json()) as T;
 };
 
-const buildInProgressOutput = (): GitHubCheckRunOutput => ({
+const buildInProgressOutput = (
+  brandingImageUrl: string | undefined,
+): GitHubCheckRunOutput => ({
   title: 'PR Concierge is evaluating this pull request',
   summary:
-    'Checking branch naming, labels, changed files, and the CVS phrase rule.',
+    'Checking branch naming, labels, changed files, and the CVS phrase rule before saving the result and updating the PR check.',
+  ...buildOptionalImagesProperty(brandingImageUrl),
 });
 
 const countCheckStatuses = (checks: EvaluationCheck[]): GitHubCheckStatusCounts => {
@@ -134,6 +171,16 @@ export const buildGitHubCheckExternalId = (
 ): string =>
   githubDeliveryId ?? `${repositoryFullName}#${pullNumber}@${headSha}`;
 
+export const buildGitHubCheckBrandingImageUrl = (
+  repositoryFullName: string,
+  gitRef: string,
+): string =>
+  buildGitHubRepositoryRawContentUrl(
+    repositoryFullName,
+    gitRef,
+    checkBrandingAssetPath,
+  );
+
 export const createGitHubCheckRun = async (
   input: CreateGitHubCheckRunInput,
 ): Promise<GitHubCheckRunResponse> =>
@@ -148,7 +195,7 @@ export const createGitHubCheckRun = async (
       status: 'in_progress',
       external_id: input.externalId,
       started_at: new Date().toISOString(),
-      output: buildInProgressOutput(),
+      output: buildInProgressOutput(input.brandingImageUrl),
     },
   );
 
@@ -172,6 +219,7 @@ export const deriveGitHubCheckConclusion = (
 
 export const buildCompletedGitHubCheckOutput = (
   evaluation: EvaluationResult,
+  brandingImageUrl?: string,
 ): GitHubCheckRunOutput => {
   const conclusion = deriveGitHubCheckConclusion(evaluation);
   const counts = countCheckStatuses(evaluation.checks);
@@ -191,11 +239,13 @@ export const buildCompletedGitHubCheckOutput = (
       'Deterministic checks',
       ...evaluation.checks.map(formatCheckLine),
     ].join('\n'),
+    ...buildOptionalImagesProperty(brandingImageUrl),
   };
 };
 
 export const buildFailedGitHubCheckOutput = (
   requestId: string,
+  brandingImageUrl?: string,
 ): GitHubCheckRunOutput => ({
   title: 'PR Concierge could not finish',
   summary: [
@@ -204,6 +254,7 @@ export const buildFailedGitHubCheckOutput = (
   ].join('\n'),
   text:
     'Check the service logs for the matching request ID to inspect the failure details.',
+  ...buildOptionalImagesProperty(brandingImageUrl),
 });
 
 export const completeGitHubCheckRun = async (

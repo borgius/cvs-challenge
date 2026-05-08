@@ -23,7 +23,7 @@ Rendered PDF, PNG, and PPTX exports are intentionally not wired by default so br
 - official GitHub pull request payload validation via Ajv and `@octokit/webhooks-schemas`
 - deterministic risk scoring from changed file paths
 - branch naming and optional required-label checks
-- a GitHub-visible `pr-concierge` check run for supported pull request events
+- a GitHub-visible `pr-concierge` check run for supported pull request events, with branded detail art for public repositories
 - a deterministic CVS phrase rule: pass on `CVS is Rock`, fail on `CVS is not Rock`, and ignore the phrase when it is absent
 - encrypted SSM Parameter Store runtime indirection for GitHub webhook and auth inputs, with deployment scripts updating secret values outside OpenTofu state
 - structured JSON logging
@@ -111,7 +111,7 @@ For deployed Lambda runs, `scripts/deploy.sh` writes the GitHub runtime values t
 
 ## GitHub check publication
 
-For supported `pull_request` webhook actions (`opened`, `synchronize`, and `reopened`), PR Concierge creates an in-progress `pr-concierge` check run on the PR head SHA and completes that same run after the evaluation finishes.
+For supported `pull_request` webhook actions (`opened`, `synchronize`, and `reopened`), PR Concierge creates an in-progress `pr-concierge` check run on the PR head SHA, completes that same run after the evaluation finishes, and stores the evaluation in DynamoDB for deployed environments.
 
 The final conclusion comes from the deterministic checks, not from risk alone:
 
@@ -128,7 +128,16 @@ The current deterministic checks include:
   - `CVS is not Rock` → fail
   - neither phrase → skip
 
-GitHub controls the icon that appears in the UI from the check status and conclusion. PR Concierge controls the check title, summary, and detail text.
+GitHub still controls the small status glyph that appears in the pull request UI from the check status and conclusion. PR Concierge controls the check title, summary, detail text, and — for public repositories — the branded image shown in the check details pane.
+
+### Check branding
+
+For public repositories, PR Concierge pins a branded PNG from `diagrams/assets/pr-concierge-check-icon.png` to the evaluated commit SHA by using the Checks API `output.images` field. The editable SVG source lives beside it at `diagrams/assets/pr-concierge-check-icon.svg`.
+
+That means reviewers see both parts of the feedback loop:
+
+- a durable evaluation record in DynamoDB
+- a reviewer-visible `pr-concierge` check with branded details on the pull request
 
 ### Auth requirement for live check publication
 
@@ -312,8 +321,3 @@ This scaffold keeps the MVP foundation small and honest:
 - The default deployed test pass in GitHub Actions stays conservative: health, empty-body rejection, and invalid-signature rejection are always checked, while the live signed-webhook success path remains opt-in.
 
 That keeps the repo ready for the next implementation pass without overselling unfinished infrastructure. A little less smoke, a little more signal.
-
-nd 
-### test check
-
-CVS is Rock

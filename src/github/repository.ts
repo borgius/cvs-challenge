@@ -4,6 +4,19 @@ const gitHubRepositoryFullNamePattern = new RegExp(
   `^(${gitHubOwnerPattern})\/(${gitHubRepositoryPattern})$`,
 );
 
+const encodeGitHubSlashSeparatedValue = (
+  value: string,
+  description: string,
+): string => {
+  const segments = value.trim().split('/').filter(Boolean);
+
+  if (segments.length === 0) {
+    throw new Error(`${description} must contain at least one path segment.`);
+  }
+
+  return segments.map((segment) => encodeURIComponent(segment)).join('/');
+};
+
 export interface GitHubRepositoryNameParts {
   owner: string;
   repo: string;
@@ -41,4 +54,16 @@ export const buildGitHubRepositoryApiUrl = (
   );
 
   return `https://api.github.com/repos/${encodedOwner}/${encodedRepo}${path}`;
+};
+
+export const buildGitHubRepositoryRawContentUrl = (
+  repositoryFullName: string,
+  ref: string,
+  path: string,
+): string => {
+  const { encodedOwner, encodedRepo } = parseGitHubRepositoryFullName(
+    repositoryFullName,
+  );
+
+  return `https://raw.githubusercontent.com/${encodedOwner}/${encodedRepo}/${encodeGitHubSlashSeparatedValue(ref, 'Git reference')}/${encodeGitHubSlashSeparatedValue(path, 'Repository asset path')}`;
 };
