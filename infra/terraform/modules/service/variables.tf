@@ -56,36 +56,41 @@ variable "log_retention_in_days" {
 }
 
 variable "github_webhook_secret" {
-  description = "Webhook secret injected into the Lambda environment for signature validation."
+  description = "Webhook secret stored in encrypted SSM Parameter Store for runtime signature validation."
   type        = string
   default     = null
   sensitive   = true
 }
 
 variable "github_token" {
-  description = "Optional GitHub token injected into the Lambda environment for changed-file lookup fallback."
+  description = "Optional GitHub token stored in encrypted SSM Parameter Store for changed-file lookup fallback."
   type        = string
   default     = null
   sensitive   = true
 }
 
 variable "github_app_id" {
-  description = "GitHub App ID injected into the Lambda environment for check-run authentication."
+  description = "GitHub App ID stored in encrypted SSM Parameter Store for check-run authentication."
   type        = string
   default     = null
 }
 
 variable "github_app_private_key" {
-  description = "GitHub App private key injected into the Lambda environment for installation token minting."
+  description = "GitHub App private key stored in encrypted SSM Parameter Store for installation token minting."
   type        = string
   default     = null
   sensitive   = true
 }
 
 variable "github_app_installation_id" {
-  description = "Optional GitHub App installation ID injected into the Lambda environment to skip installation lookup."
+  description = "Optional GitHub App installation ID stored in encrypted SSM Parameter Store to skip installation lookup."
   type        = string
   default     = null
+}
+
+variable "github_ssm_parameter_path_prefix" {
+  description = "SSM Parameter Store path prefix used to store GitHub runtime inputs."
+  type        = string
 }
 
 variable "evaluations_table_name" {

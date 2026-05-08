@@ -22,7 +22,7 @@ Use four distinct input lanes with this root:
 - `env/<env>.auto.tfvars` — non-secret root variables such as naming, region, runtime tuning, data-protection flags, alarm settings, and the optional `allowed_account_ids` safety rail
 - `backend/<env>.s3.tfbackend` — backend coordinates only, such as `bucket`, `key`, `region`, `encrypt`, and `dynamodb_table`
 - the standard AWS credential chain — AWS profile, AWS SSO, assume-role, or OIDC/web identity for both the provider and the S3 backend
-- `TF_VAR_github_webhook_secret`, `TF_VAR_github_app_id`, `TF_VAR_github_app_private_key`, the optional `TF_VAR_github_app_installation_id`, and the optional `TF_VAR_github_token` fallback — the remaining application inputs that still flow into managed resources; `scripts/deploy.sh` and `scripts/destroy.sh` can populate these from `.env`
+- `TF_VAR_github_webhook_secret`, `TF_VAR_github_app_id`, `TF_VAR_github_app_private_key`, the optional `TF_VAR_github_app_installation_id`, and the optional `TF_VAR_github_token` fallback — the remaining application inputs that still flow into managed resources so OpenTofu can refresh the encrypted SSM parameters used by the deployed Lambda runtime; `scripts/deploy.sh` and `scripts/destroy.sh` can populate these from `.env`
 
 Keep AWS credentials out of `.env`, `*.auto.tfvars`, and `*.s3.tfbackend` files.
 
@@ -31,6 +31,7 @@ Keep AWS credentials out of `.env`, `*.auto.tfvars`, and `*.s3.tfbackend` files.
 - Lambda function for the Hono application
 - API Gateway HTTP API with `GET /health` and `POST /webhooks/github`
 - DynamoDB table for evaluation records
+- encrypted SSM parameters for GitHub webhook and runtime auth inputs
 - optional S3 bucket for raw webhook archive storage
 - SNS topic for alarm delivery
 - CloudWatch alarms for Lambda `Errors` and HTTP API `5xx`
@@ -56,4 +57,4 @@ The GitHub Actions deploy-readiness workflow runs the same validation steps, but
 - `scripts/configure-self-webhook.sh` is a separate, explicit repository-mutation step. It reads `.artifacts/<service>-deployment.json` to find the deployed `webhookUrl`, then creates or updates the managed repository webhook under a separate GitHub admin-auth lane.
 - Keep label bootstrap conditional. If you leave `required_labels` empty, basic self-hook setup stops at webhook wiring. If you later set `required_labels`, create the matching GitHub labels as a separate repository task.
 - `scripts/destroy.sh` preserves DynamoDB and S3 data by default through targeted destroy. Set `DELETE_DATA=true` for full stack removal.
-- The root accepts raw application secrets because the Lambda runtime still expects them as environment variables. OpenTofu marks them sensitive in CLI output, but they still exist in state. Secrets Manager or SSM is the future path if you want to remove the raw values from state.
+- The root now stores GitHub runtime values in encrypted SSM parameters and injects only parameter names into the Lambda environment. OpenTofu still accepts the raw inputs because it manages the `SecureString` parameter values, so the raw values still exist in state even though the Lambda environment no longer contains them.

@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { setSsmParameterLoaderForTests } from '../../../src/config/env.ts';
 import type { PullRequestPayload } from '../../../src/types/github.ts';
 import { handler } from '../../../src/index.ts';
 import { buildHttpApiV2Event } from '../helpers/buildHttpApiV2Event.ts';
@@ -223,6 +224,7 @@ const createGitHubApiFetchMock = (): {
 const runSignedWebhook = async (
   payload: PullRequestPayload,
   requestId: string,
+  webhookSecret: string = localTestEnvDefaults.GITHUB_WEBHOOK_SECRET,
 ): Promise<LambdaResponse> => {
   const rawBody = JSON.stringify(payload);
 
@@ -235,7 +237,7 @@ const runSignedWebhook = async (
         'x-github-delivery': 'delivery-42',
         'x-hub-signature-256': createGitHubSignature(
           rawBody,
-          localTestEnvDefaults.GITHUB_WEBHOOK_SECRET,
+          webhookSecret,
         ),
       },
       body: rawBody,
@@ -464,6 +466,82 @@ describe('local Lambda webhook integration', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('loads GitHub runtime secrets from SSM when direct env values are absent', async () => {
+    applyLocalTestEnv({
+      GITHUB_APP_ID: '',
+      GITHUB_APP_INSTALLATION_ID: '',
+      GITHUB_APP_PRIVATE_KEY: '',
+      GITHUB_TOKEN: '',
+      GITHUB_WEBHOOK_SECRET: '',
+      GITHUB_APP_ID_SSM_PARAMETER_NAME: '/pr-concierge/test/github/app-id',
+      GITHUB_APP_INSTALLATION_ID_SSM_PARAMETER_NAME:
+        '/pr-concierge/test/github/app-installation-id',
+      GITHUB_APP_PRIVATE_KEY_SSM_PARAMETER_NAME:
+        '/pr-concierge/test/github/app-private-key',
+      GITHUB_TOKEN_SSM_PARAMETER_NAME: '/pr-concierge/test/github/token',
+      GITHUB_WEBHOOK_SECRET_SSM_PARAMETER_NAME:
+        '/pr-concierge/test/github/webhook-secret',
+    });
+
+    const ssmParameterLoader = vi.fn(
+      async (_awsRegion: string, parameterNames: string[]) =>
+        new Map(
+          parameterNames.map((parameterName) => {
+            switch (parameterName) {
+              case '/pr-concierge/test/github/webhook-secret':
+                return [parameterName, 'ssm-test-webhook-secret'] as const;
+              case '/pr-concierge/test/github/token':
+                return [parameterName, 'local-test-github-token'] as const;
+              case '/pr-concierge/test/github/app-id':
+                return [parameterName, '123456'] as const;
+              case '/pr-concierge/test/github/app-private-key':
+                return [parameterName, localTestEnvDefaults.GITHUB_APP_PRIVATE_KEY] as const;
+              case '/pr-concierge/test/github/app-installation-id':
+                return [parameterName, '987654'] as const;
+              default:
+                throw new Error(`Unexpected SSM parameter request: ${parameterName}`);
+            }
+          }),
+        ),
+    );
+
+    setSsmParameterLoaderForTests(ssmParameterLoader);
+
+    const payload = buildSuccessfulWebhookPayload({
+      body: 'This change proves that CVS is Rock.',
+    });
+    const { fetchMock, requests } = createGitHubApiFetchMock();
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await runSignedWebhook(
+      payload,
+      'local-ssm-config-request-id',
+      'ssm-test-webhook-secret',
+    );
+    const body = parseJsonBody(response);
+
+    expect(response.statusCode).toBe(200);
+    expect(body.summary).toContain('cvs phrase: pass');
+    expect(ssmParameterLoader).toHaveBeenCalledTimes(1);
+    expect(ssmParameterLoader).toHaveBeenCalledWith('us-east-1', [
+      '/pr-concierge/test/github/webhook-secret',
+      '/pr-concierge/test/github/token',
+      '/pr-concierge/test/github/app-id',
+      '/pr-concierge/test/github/app-private-key',
+      '/pr-concierge/test/github/app-installation-id',
+    ]);
+    expect(requests.map((request) => `${request.method} ${request.url}`)).toEqual([
+      'POST https://api.github.com/app/installations/987654/access_tokens',
+      'POST https://api.github.com/repos/octo-org/pr-concierge/check-runs',
+      'GET https://api.github.com/repos/octo-org/pr-concierge/pulls/42/files?per_page=100&page=1',
+      'PATCH https://api.github.com/repos/octo-org/pr-concierge/check-runs/7001',
+    ]);
+    expect(requests[2]?.headers.get('authorization')).toBe(
+      'Bearer local-test-github-token',
+    );
+  });
+
   it('creates and completes a GitHub check run when the PR text says CVS is Rock', async () => {
     applyLocalTestEnv();
 
@@ -550,6 +628,7 @@ describe('local Lambda webhook integration', () => {
 
     const response = await runSignedWebhook(payload, 'local-cvs-failure-request-id');
     const body = parseJsonBody(response);
+    const checkRunUpdateRequest = getRecordedRequest(requests, requests.length - 1);
 
     expect(response.statusCode).toBe(200);
     expect(body.summary).toContain('cvs phrase: fail');
@@ -559,13 +638,13 @@ describe('local Lambda webhook integration', () => {
       details:
         'PR text says "CVS is not Rock". Remove the opposite phrase or replace it with "CVS is Rock".',
     });
-    expect(requests[2]?.jsonBody).toMatchObject({
+    expect(checkRunUpdateRequest.jsonBody).toMatchObject({
       conclusion: 'failure',
       output: {
         title: 'PR Concierge found issues',
       },
     });
-    expect(requests[2]?.jsonBody?.output).toMatchObject({
+    expect(checkRunUpdateRequest.jsonBody?.output).toMatchObject({
       summary: expect.stringContaining('Next step: update the PR title or description to remove "CVS is not Rock"'),
       text: expect.stringContaining('cvs phrase: fail'),
     });
@@ -583,6 +662,7 @@ describe('local Lambda webhook integration', () => {
 
     const response = await runSignedWebhook(payload, 'local-cvs-skip-request-id');
     const body = parseJsonBody(response);
+    const checkRunUpdateRequest = getRecordedRequest(requests, requests.length - 1);
 
     expect(response.statusCode).toBe(200);
     expect(body.summary).toContain('cvs phrase: skip');
@@ -591,7 +671,7 @@ describe('local Lambda webhook integration', () => {
       status: 'skip',
       details: 'PR text does not mention either CVS phrase.',
     });
-    expect(requests[2]?.jsonBody).toMatchObject({
+    expect(checkRunUpdateRequest.jsonBody).toMatchObject({
       conclusion: 'success',
       output: {
         title: 'PR Concierge passed',

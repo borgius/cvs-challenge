@@ -22,6 +22,11 @@ interface CachedInstallationToken {
 const installationIdCache = new Map<string, string>();
 const installationTokenCache = new Map<string, CachedInstallationToken>();
 
+export const resetGitHubAuthCacheForTests = (): void => {
+  installationIdCache.clear();
+  installationTokenCache.clear();
+};
+
 const parseRepositoryFullName = (
   repositoryFullName: string,
 ): { owner: string; repo: string } => {

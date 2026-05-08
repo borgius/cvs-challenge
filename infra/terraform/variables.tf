@@ -114,34 +114,40 @@ variable "api_integration_timeout_milliseconds" {
 }
 
 variable "github_webhook_secret" {
-  description = "GitHub webhook secret injected into the Lambda environment."
+  description = "GitHub webhook secret stored in encrypted SSM Parameter Store for Lambda runtime resolution."
   type        = string
   default     = null
   sensitive   = true
 }
 
 variable "github_token" {
-  description = "Optional GitHub token injected into the Lambda environment as a changed-file lookup fallback."
+  description = "Optional GitHub token stored in encrypted SSM Parameter Store as a changed-file lookup fallback."
   type        = string
   default     = null
   sensitive   = true
 }
 
 variable "github_app_id" {
-  description = "GitHub App ID injected into the Lambda environment for check-run authentication."
+  description = "GitHub App ID stored in encrypted SSM Parameter Store for check-run authentication."
   type        = string
   default     = null
 }
 
 variable "github_app_private_key" {
-  description = "GitHub App private key injected into the Lambda environment for installation token minting."
+  description = "GitHub App private key stored in encrypted SSM Parameter Store for installation token minting."
   type        = string
   default     = null
   sensitive   = true
 }
 
 variable "github_app_installation_id" {
-  description = "Optional GitHub App installation ID injected into the Lambda environment to skip repository installation lookup."
+  description = "Optional GitHub App installation ID stored in encrypted SSM Parameter Store to skip repository installation lookup."
+  type        = string
+  default     = null
+}
+
+variable "github_ssm_parameter_path_prefix" {
+  description = "Optional SSM Parameter Store path prefix used for GitHub runtime inputs. Defaults to /<service>/<environment>/github."
   type        = string
   default     = null
 }

@@ -2,6 +2,9 @@ import { generateKeyPairSync } from 'node:crypto';
 import type { Context } from 'aws-lambda';
 import { vi } from 'vitest';
 
+import { resetAppConfigCacheForTests } from '../../../src/config/env.ts';
+import { resetGitHubAuthCacheForTests } from '../../../src/github/auth.ts';
+
 const { privateKey: localTestGitHubAppPrivateKey } = generateKeyPairSync('rsa', {
   modulusLength: 2048,
   publicKeyEncoding: {
@@ -38,6 +41,9 @@ export const applyLocalTestEnv = (
   for (const [name, value] of Object.entries(resolvedEnv)) {
     vi.stubEnv(name, value);
   }
+
+  resetAppConfigCacheForTests();
+  resetGitHubAuthCacheForTests();
 };
 
 export const createLambdaContext = (

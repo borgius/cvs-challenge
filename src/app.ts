@@ -94,7 +94,7 @@ app.post('/webhooks/github', async (c) => {
   }
 
   try {
-    const config = loadAppConfig();
+    const config = await loadAppConfig();
     const signatureHeader = c.req.header('x-hub-signature-256');
 
     if (!isValidGitHubSignature(rawBody, signatureHeader, config.githubWebhookSecret)) {
