@@ -32,6 +32,7 @@ export interface EvaluationRecord {
 
 export interface EvaluationResult {
   summary: string;
+  nextStep: string;
   checks: EvaluationCheck[];
   riskAssessment: RiskAssessment;
   record: EvaluationRecord;

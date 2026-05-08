@@ -7,6 +7,14 @@ import { secureHeaders } from 'hono/secure-headers';
 
 import { loadAppConfig } from './config/env.ts';
 import { fetchPullRequestFiles } from './github/client.ts';
+import {
+  buildCompletedGitHubCheckOutput,
+  buildFailedGitHubCheckOutput,
+  buildGitHubCheckExternalId,
+  completeGitHubCheckRun,
+  createGitHubCheckRun,
+  deriveGitHubCheckConclusion,
+} from './github/checks.ts';
 import { validatePullRequestPayload } from './github/payload.ts';
 import { isValidGitHubSignature } from './github/signature.ts';
 import { evaluatePullRequest } from './services/evaluatePullRequest.ts';
@@ -101,6 +109,7 @@ app.post('/webhooks/github', async (c) => {
       return c.json(
         {
           message: 'Invalid GitHub pull request payload.',
+          details: payloadValidationResult.errors,
           requestId,
         },
         400,
@@ -133,55 +142,123 @@ app.post('/webhooks/github', async (c) => {
     }
 
     const repositoryFullName = payload.repository.full_name;
+    const headSha = payload.pull_request.head.sha;
+
+    if (!headSha) {
+      return c.json(
+        {
+          message: 'Pull request head SHA is missing from the webhook payload.',
+          requestId,
+        },
+        400,
+      );
+    }
+
     const labels = (payload.pull_request.labels ?? []).map((label) => label.name);
-    const changedFiles = (await fetchPullRequestFiles(
-      repositoryFullName,
-      pullNumber,
-      config.githubToken,
-    )).map((file) => file.filename);
     const githubDeliveryId = c.req.header('x-github-delivery');
     const rawEventS3Key =
       config.enableRawEventArchive && config.rawEventBucketName
         ? buildRawEventKey(repositoryFullName, pullNumber, githubDeliveryId)
         : undefined;
     const repository = createEvaluationRepository(config);
-
-    const evaluation = await evaluatePullRequest({
-      action: payload.action,
+    const checkRunExternalId = buildGitHubCheckExternalId(
       repositoryFullName,
       pullNumber,
-      branchName: payload.pull_request.head.ref,
-      baseBranch: payload.pull_request.base.ref,
-      headSha: payload.pull_request.head.sha,
-      changedFiles,
-      labels,
-      requiredLabels: config.requiredLabels,
+      headSha,
       githubDeliveryId,
-      rawEventS3Key,
-      repository,
-    });
+    );
+    let checkRunId: number | undefined;
 
-    logger.info('Pull request evaluation completed', {
-      requestId,
-      repositoryFullName,
-      pullRequestNumber: pullNumber,
-      action: payload.action,
-      riskLevel: evaluation.riskAssessment.riskLevel,
-      changedFileCount: changedFiles.length,
-    });
+    try {
+      const createdCheckRun = await createGitHubCheckRun({
+        repositoryFullName,
+        githubToken: config.githubToken,
+        headSha,
+        externalId: checkRunExternalId,
+      });
 
-    return c.json({
-      message: 'Pull request evaluated successfully.',
-      requestId,
-      summary: evaluation.summary,
-      riskLevel: evaluation.riskAssessment.riskLevel,
-      changedAreas: evaluation.riskAssessment.changedAreas,
-      checks: evaluation.checks,
-      recordKey: {
-        pk: evaluation.record.pk,
-        sk: evaluation.record.sk,
-      },
-    });
+      checkRunId = createdCheckRun.id;
+
+      const changedFiles = (await fetchPullRequestFiles(
+        repositoryFullName,
+        pullNumber,
+        config.githubToken,
+      )).map((file) => file.filename);
+      const evaluation = await evaluatePullRequest({
+        action: payload.action,
+        repositoryFullName,
+        pullNumber,
+        pullRequestTitle: payload.pull_request.title,
+        pullRequestBody: payload.pull_request.body,
+        branchName: payload.pull_request.head.ref,
+        baseBranch: payload.pull_request.base.ref,
+        headSha,
+        changedFiles,
+        labels,
+        requiredLabels: config.requiredLabels,
+        githubDeliveryId,
+        rawEventS3Key,
+        repository,
+      });
+      const checkConclusion = deriveGitHubCheckConclusion(evaluation);
+
+      await completeGitHubCheckRun({
+        repositoryFullName,
+        githubToken: config.githubToken,
+        checkRunId,
+        conclusion: checkConclusion,
+        output: buildCompletedGitHubCheckOutput(evaluation),
+      });
+
+      logger.info('Pull request evaluation completed', {
+        requestId,
+        repositoryFullName,
+        pullRequestNumber: pullNumber,
+        action: payload.action,
+        checkRunId,
+        checkConclusion,
+        riskLevel: evaluation.riskAssessment.riskLevel,
+        changedFileCount: changedFiles.length,
+      });
+
+      return c.json({
+        message: 'Pull request evaluated successfully.',
+        requestId,
+        summary: evaluation.summary,
+        riskLevel: evaluation.riskAssessment.riskLevel,
+        changedAreas: evaluation.riskAssessment.changedAreas,
+        checks: evaluation.checks,
+        recordKey: {
+          pk: evaluation.record.pk,
+          sk: evaluation.record.sk,
+        },
+      });
+    } catch (error) {
+      if (checkRunId !== undefined) {
+        try {
+          await completeGitHubCheckRun({
+            repositoryFullName,
+            githubToken: config.githubToken,
+            checkRunId,
+            conclusion: 'failure',
+            output: buildFailedGitHubCheckOutput(requestId),
+          });
+        } catch (checkRunError) {
+          logger.error('Failed to complete GitHub check run after webhook error', {
+            requestId,
+            repositoryFullName,
+            pullRequestNumber: pullNumber,
+            checkRunId,
+            error:
+              checkRunError instanceof Error
+                ? checkRunError
+                : new Error(String(checkRunError)),
+          });
+        }
+      }
+
+      throw error;
+    }
   } catch (error) {
     logger.error('Failed to process GitHub webhook', {
       requestId,

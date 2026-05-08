@@ -8,6 +8,8 @@ export interface EvaluatePullRequestInput {
   action: string;
   repositoryFullName: string;
   pullNumber: number;
+  pullRequestTitle: string;
+  pullRequestBody: string | null | undefined;
   branchName: string;
   baseBranch: string;
   headSha: string | undefined;
@@ -57,13 +59,50 @@ const buildRequiredLabelsCheck = (
       };
 };
 
+const buildCvsPhraseCheck = (
+  pullRequestTitle: string,
+  pullRequestBody: string | null | undefined,
+): EvaluationCheck => {
+  const combinedText = `${pullRequestTitle}\n${pullRequestBody ?? ''}`.toLowerCase();
+
+  if (combinedText.includes('cvs is not rock')) {
+    return {
+      name: 'cvs phrase',
+      status: 'fail',
+      details:
+        'PR text says "CVS is not Rock". Remove the opposite phrase or replace it with "CVS is Rock".',
+    };
+  }
+
+  if (combinedText.includes('cvs is rock')) {
+    return {
+      name: 'cvs phrase',
+      status: 'pass',
+      details: 'PR text includes "CVS is Rock".',
+    };
+  }
+
+  return {
+    name: 'cvs phrase',
+    status: 'skip',
+    details: 'PR text does not mention either CVS phrase.',
+  };
+};
+
 const determineNextStep = (checks: EvaluationCheck[], riskLevel: RiskLevel): string => {
   const blockingCheck = checks.find((check) => check.status === 'fail');
 
   if (blockingCheck) {
-    return blockingCheck.name === 'branch naming'
-      ? 'rename the branch to match the platform convention'
-      : 'add the required labels before merge';
+    switch (blockingCheck.name) {
+      case 'branch naming':
+        return 'rename the branch to match the platform convention';
+      case 'required labels':
+        return 'add the required labels before merge';
+      case 'cvs phrase':
+        return 'update the PR title or description to remove "CVS is not Rock"';
+      default:
+        return 'resolve the failing checks before merge';
+    }
   }
 
   if (riskLevel === 'high') {
@@ -122,14 +161,21 @@ export const evaluatePullRequest = async (
     input.labels,
     input.requiredLabels,
   );
-  const checks: [EvaluationCheck, EvaluationCheck] = [
+  const cvsPhraseCheck = buildCvsPhraseCheck(
+    input.pullRequestTitle,
+    input.pullRequestBody,
+  );
+  const checks: EvaluationCheck[] = [
     branchNameCheck,
     requiredLabelsCheck,
+    cvsPhraseCheck,
   ];
   const nextStep = determineNextStep(checks, riskAssessment.riskLevel);
   const summary = [
     `risk: ${riskAssessment.riskLevel}`,
     `branch naming: ${branchNameCheck.status}`,
+    `required labels: ${requiredLabelsCheck.status}`,
+    `cvs phrase: ${cvsPhraseCheck.status}`,
     `changed areas: ${riskAssessment.changedAreas.join(', ')}`,
     `next step: ${nextStep}`,
   ].join('\n');
@@ -146,6 +192,7 @@ export const evaluatePullRequest = async (
 
   return {
     summary,
+    nextStep,
     checks,
     riskAssessment,
     record,

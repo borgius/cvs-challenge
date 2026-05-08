@@ -1,0 +1,238 @@
+import type { CheckStatus, EvaluationCheck, EvaluationResult } from '../types/evaluation.ts';
+
+const githubApiVersion = '2022-11-28';
+const checkRunName = 'pr-concierge';
+
+export type GitHubCheckRunConclusion =
+  | 'action_required'
+  | 'cancelled'
+  | 'failure'
+  | 'neutral'
+  | 'skipped'
+  | 'success'
+  | 'timed_out';
+
+export interface GitHubCheckRunOutput {
+  title: string;
+  summary: string;
+  text?: string;
+}
+
+export interface CreateGitHubCheckRunInput {
+  repositoryFullName: string;
+  githubToken: string;
+  headSha: string;
+  externalId: string;
+}
+
+export interface CompleteGitHubCheckRunInput {
+  repositoryFullName: string;
+  githubToken: string;
+  checkRunId: number;
+  conclusion: GitHubCheckRunConclusion;
+  output: GitHubCheckRunOutput;
+}
+
+interface GitHubCheckRunResponse {
+  id: number;
+  html_url?: string;
+}
+
+interface GitHubCheckStatusCounts {
+  pass: number;
+  fail: number;
+  warn: number;
+  skip: number;
+}
+
+const parseRepositoryFullName = (
+  repositoryFullName: string,
+): { owner: string; repo: string } => {
+  const [owner, repo] = repositoryFullName.split('/');
+
+  if (!owner || !repo) {
+    throw new Error(
+      `Repository name must be in owner/repo format: ${repositoryFullName}`,
+    );
+  }
+
+  return { owner, repo };
+};
+
+const buildGitHubHeaders = (githubToken: string): Record<string, string> => ({
+  accept: 'application/vnd.github+json',
+  authorization: `Bearer ${githubToken}`,
+  'content-type': 'application/json',
+  'user-agent': 'pr-concierge',
+  'x-github-api-version': githubApiVersion,
+});
+
+const readGitHubErrorText = async (response: Response): Promise<string> => {
+  const responseText = await response.text();
+  return responseText ? `: ${responseText}` : '';
+};
+
+const requestGitHubCheckRun = async <T>(
+  repositoryFullName: string,
+  githubToken: string,
+  path: string,
+  method: 'POST' | 'PATCH',
+  body: Record<string, unknown>,
+): Promise<T> => {
+  const { owner, repo } = parseRepositoryFullName(repositoryFullName);
+  const response = await fetch(`https://api.github.com/repos/${owner}/${repo}${path}`, {
+    method,
+    headers: buildGitHubHeaders(githubToken),
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    throw new Error(
+      `GitHub Checks API ${method} ${path} failed with status ${response.status}${await readGitHubErrorText(response)}`,
+    );
+  }
+
+  return (await response.json()) as T;
+};
+
+const buildInProgressOutput = (): GitHubCheckRunOutput => ({
+  title: 'PR Concierge is evaluating this pull request',
+  summary:
+    'Checking branch naming, labels, changed files, and the CVS phrase rule.',
+});
+
+const countCheckStatuses = (checks: EvaluationCheck[]): GitHubCheckStatusCounts => {
+  const counts: GitHubCheckStatusCounts = {
+    pass: 0,
+    fail: 0,
+    warn: 0,
+    skip: 0,
+  };
+
+  for (const check of checks) {
+    counts[check.status as CheckStatus] += 1;
+  }
+
+  return counts;
+};
+
+const formatChangedAreas = (changedAreas: string[]): string =>
+  changedAreas.length > 0 ? changedAreas.join(', ') : 'none detected';
+
+const formatCheckCounts = (counts: GitHubCheckStatusCounts): string =>
+  `${counts.pass} passed, ${counts.fail} failed, ${counts.warn} warned, ${counts.skip} skipped`;
+
+const formatCheckLine = (check: EvaluationCheck): string =>
+  `- ${check.name}: ${check.status} — ${check.details}`;
+
+const buildConclusionTitle = (
+  conclusion: GitHubCheckRunConclusion,
+): string => {
+  switch (conclusion) {
+    case 'failure':
+      return 'PR Concierge found issues';
+    case 'neutral':
+      return 'PR Concierge finished with warnings';
+    case 'skipped':
+      return 'PR Concierge skipped this pull request';
+    default:
+      return 'PR Concierge passed';
+  }
+};
+
+export const buildGitHubCheckExternalId = (
+  repositoryFullName: string,
+  pullNumber: number,
+  headSha: string,
+  githubDeliveryId: string | undefined,
+): string =>
+  githubDeliveryId ?? `${repositoryFullName}#${pullNumber}@${headSha}`;
+
+export const createGitHubCheckRun = async (
+  input: CreateGitHubCheckRunInput,
+): Promise<GitHubCheckRunResponse> =>
+  requestGitHubCheckRun<GitHubCheckRunResponse>(
+    input.repositoryFullName,
+    input.githubToken,
+    '/check-runs',
+    'POST',
+    {
+      name: checkRunName,
+      head_sha: input.headSha,
+      status: 'in_progress',
+      external_id: input.externalId,
+      started_at: new Date().toISOString(),
+      output: buildInProgressOutput(),
+    },
+  );
+
+export const deriveGitHubCheckConclusion = (
+  evaluation: EvaluationResult,
+): GitHubCheckRunConclusion => {
+  if (evaluation.checks.some((check) => check.status === 'fail')) {
+    return 'failure';
+  }
+
+  if (evaluation.checks.some((check) => check.status === 'warn')) {
+    return 'neutral';
+  }
+
+  if (evaluation.checks.every((check) => check.status === 'skip')) {
+    return 'skipped';
+  }
+
+  return 'success';
+};
+
+export const buildCompletedGitHubCheckOutput = (
+  evaluation: EvaluationResult,
+): GitHubCheckRunOutput => {
+  const conclusion = deriveGitHubCheckConclusion(evaluation);
+  const counts = countCheckStatuses(evaluation.checks);
+
+  return {
+    title: buildConclusionTitle(conclusion),
+    summary: [
+      `Checks: ${formatCheckCounts(counts)}`,
+      `Risk: ${evaluation.riskAssessment.riskLevel}`,
+      `Changed areas: ${formatChangedAreas(evaluation.riskAssessment.changedAreas)}`,
+      `Next step: ${evaluation.nextStep}`,
+    ].join('\n'),
+    text: [
+      'Evaluation summary',
+      evaluation.summary,
+      '',
+      'Deterministic checks',
+      ...evaluation.checks.map(formatCheckLine),
+    ].join('\n'),
+  };
+};
+
+export const buildFailedGitHubCheckOutput = (
+  requestId: string,
+): GitHubCheckRunOutput => ({
+  title: 'PR Concierge could not finish',
+  summary: [
+    'PR Concierge started this evaluation but failed before it could complete.',
+    `Request ID: ${requestId}`,
+  ].join('\n'),
+  text:
+    'Check the service logs for the matching request ID to inspect the failure details.',
+});
+
+export const completeGitHubCheckRun = async (
+  input: CompleteGitHubCheckRunInput,
+): Promise<GitHubCheckRunResponse> =>
+  requestGitHubCheckRun<GitHubCheckRunResponse>(
+    input.repositoryFullName,
+    input.githubToken,
+    `/check-runs/${input.checkRunId}`,
+    'PATCH',
+    {
+      name: checkRunName,
+      status: 'completed',
+      conclusion: input.conclusion,
+      completed_at: new Date().toISOString(),
+      output: input.output,
+    },
+  );

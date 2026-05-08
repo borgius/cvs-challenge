@@ -12,6 +12,10 @@ type JsonObject = Record<string, unknown>;
 type AjvModule = typeof import('ajv');
 type AjvFormatsModule = typeof import('ajv-formats');
 const maxValidationErrorsToReport = 20;
+const githubUserViewTypePropertyName = 'user_view_type';
+const githubUserViewTypeSchema = {
+  type: ['string', 'null'],
+} as const;
 
 export interface PullRequestPayloadValidationError {
   instancePath: string;
@@ -43,10 +47,38 @@ const formatValidationErrors = (
     params: error.params,
   }));
 
+const cloneJsonValue = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
+
+const patchGitHubWebhookSchemaForCurrentPullRequestPayloads = (
+  schema: GitHubWebhookSchema,
+): GitHubWebhookSchema => {
+  const patchedSchema = cloneJsonValue(schema);
+  const userDefinition = patchedSchema.definitions['user'];
+
+  if (!isJsonObject(userDefinition)) {
+    return patchedSchema;
+  }
+
+  const userProperties = isJsonObject(userDefinition.properties)
+    ? userDefinition.properties
+    : {};
+
+  // GitHub pull_request webhook payloads now include `user_view_type` on user objects,
+  // but the latest published @octokit/webhooks-schemas package does not model it yet.
+  userDefinition.properties = {
+    ...userProperties,
+    [githubUserViewTypePropertyName]: githubUserViewTypeSchema,
+  };
+
+  return patchedSchema;
+};
+
 const require = createRequire(import.meta.url);
 const { default: Ajv } = require('ajv') as AjvModule;
 const { default: addFormats } = require('ajv-formats') as AjvFormatsModule;
-const githubWebhookSchema = require('@octokit/webhooks-schemas') as GitHubWebhookSchema;
+const githubWebhookSchema = patchGitHubWebhookSchemaForCurrentPullRequestPayloads(
+  require('@octokit/webhooks-schemas') as GitHubWebhookSchema,
+);
 const pullRequestEventSchemaDefinition =
   githubWebhookSchema.definitions['pull_request_event'];
 
