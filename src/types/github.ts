@@ -16,6 +16,8 @@ export interface PullRequestPayload {
   number?: number;
   pull_request: {
     number?: number;
+    title?: string;
+    body?: string | null;
     head: PullRequestRef;
     base: PullRequestRef;
     labels?: PullRequestLabel[];

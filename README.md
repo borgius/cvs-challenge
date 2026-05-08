@@ -1,7 +1,7 @@
 # PR Concierge
 
 PR Concierge is a small internal platform service for pull request hygiene and release awareness.
-It accepts GitHub pull request webhooks, validates the signature, validates the webhook payload against GitHub's published schema, applies a few deterministic platform rules, scores PR risk from changed files, and produces a short summary that developers can act on.
+It accepts GitHub pull request webhooks, validates the signature, validates the webhook payload against GitHub's published schema, applies a few deterministic platform rules, scores PR risk from changed files, publishes a `pr-concierge` GitHub check run, and produces a short summary that developers can act on.
 
 The HTTP layer now runs on [Hono](https://hono.dev/) so the project uses Hono routing, JSON helpers, AWS Lambda integration, and built-in middleware instead of custom response and handler modules.
 
@@ -23,6 +23,8 @@ Rendered PDF, PNG, and PPTX exports are intentionally not wired by default so br
 - official GitHub pull request payload validation via Ajv and `@octokit/webhooks-schemas`
 - deterministic risk scoring from changed file paths
 - branch naming and optional required-label checks
+- a GitHub-visible `pr-concierge` check run for supported pull request events
+- a deterministic CVS phrase rule: pass on `CVS is Rock`, fail on `CVS is not Rock`, and ignore the phrase when it is absent
 - structured JSON logging
 - DynamoDB-backed evaluation persistence for deployed environments, with console logging available for local development
 - OpenTofu root configuration and local wrapper modules for Lambda, HTTP API, DynamoDB, optional S3, SNS, and CloudWatch alarms
@@ -88,13 +90,45 @@ Keep `.env` for application runtime values and the small set of deployment secre
 | Variable | Required | Purpose |
 | --- | --- | --- |
 | `GITHUB_WEBHOOK_SECRET` | Yes | Validates the `x-hub-signature-256` header from GitHub, feeds `TF_VAR_github_webhook_secret` during deploy and destroy if you do not export it directly, and is reused by `scripts/configure-self-webhook.sh` when you explicitly configure this repository's managed webhook |
-| `GITHUB_TOKEN` | Yes | Reads changed files from the GitHub REST API and feeds `TF_VAR_github_token` during deploy and destroy if you do not export it directly; it stays on the Lambda runtime lane and is not the repository-admin token for webhook management |
+| `GITHUB_TOKEN` | Yes | Reads changed files from the GitHub REST API, publishes the `pr-concierge` check run, and feeds `TF_VAR_github_token` during deploy and destroy if you do not export it directly; use a supported token type with `Checks` repository permission (write), such as a GitHub App installation token or a fine-grained PAT, and keep it separate from the repository-admin token used for webhook management |
 | `AWS_REGION` | No | Default AWS region for the local app and AWS SDK clients |
 | `EVALUATIONS_TABLE_NAME` | Yes | Target DynamoDB table name for the app runtime |
 | `RAW_EVENT_BUCKET_NAME` | No | Optional S3 bucket name for raw webhook archiving |
 | `ENABLE_RAW_EVENT_ARCHIVE` | No | Enables raw event S3 key generation when set to `true` |
 | `REQUIRED_LABELS` | No | Comma-separated labels to enforce, such as `safe-to-deploy,needs-platform-review` |
 | `EVALUATION_REPOSITORY` | No | `console` for local logging or `dynamodb` for deployed persistence |
+
+## GitHub check publication
+
+For supported `pull_request` webhook actions (`opened`, `synchronize`, and `reopened`), PR Concierge creates an in-progress `pr-concierge` check run on the PR head SHA and completes that same run after the evaluation finishes.
+
+The final conclusion comes from the deterministic checks, not from risk alone:
+
+- failing checks produce a failing GitHub check
+- warnings produce a neutral GitHub check
+- passing and skipped checks produce a successful GitHub check
+
+The current deterministic checks include:
+
+- branch naming
+- optional required labels
+- the playful CVS phrase rule:
+  - `CVS is Rock` → pass
+  - `CVS is not Rock` → fail
+  - neither phrase → skip
+
+GitHub controls the icon that appears in the UI from the check status and conclusion. PR Concierge controls the check title, summary, and detail text.
+
+### Auth requirement for live check publication
+
+Local integration tests mock GitHub HTTP calls, so they prove the code path without proving that your live token can publish checks.
+
+For real GitHub check publication, `GITHUB_TOKEN` must be a token type that GitHub accepts for `Checks` write in your environment, such as:
+
+- a GitHub App installation token
+- a fine-grained personal access token with `Checks` repository permission set to `write`
+
+Classic personal access tokens are not enough for check-run updates. If the runtime token cannot create or update check runs, `POST /webhooks/github` will fail instead of silently downgrading to a commit status.
 
 ## OpenTofu root variables
 
@@ -227,7 +261,7 @@ On pushes to `main` and manual dispatches, it:
 Configure these GitHub Actions repository secrets before using that workflow:
 
 - `AWS_DEPLOY_ROLE_ARN` — IAM role ARN assumed by GitHub Actions through OIDC
-- `PR_CONCIERGE_GITHUB_TOKEN` — GitHub token injected into Lambda for changed-file lookups
+- `PR_CONCIERGE_GITHUB_TOKEN` — GitHub token injected into Lambda for changed-file lookups and GitHub check publication; it must support `Checks` write for live PR feedback
 - `PR_CONCIERGE_WEBHOOK_SECRET` — webhook secret injected into Lambda and reused by optional deployed webhook tests
 
 Notes:
@@ -246,7 +280,7 @@ Notes:
 
 - `src/app.ts` — Hono routes, middleware, and webhook orchestration
 - `src/index.ts` — local Node server bootstrapping plus AWS Lambda `handler` export
-- `src/github/` — GitHub signature validation and changed-file API lookup
+- `src/github/` — GitHub signature validation, changed-file lookup, and check publication
 - `src/risk/` — deterministic risk classification rules
 - `src/services/` — PR evaluation workflow assembly
 - `src/storage/` — persistence abstraction with console and DynamoDB implementations

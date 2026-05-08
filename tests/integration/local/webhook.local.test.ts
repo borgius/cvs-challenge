@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { PullRequestPayload } from '../../../src/types/github.ts';
 import { handler } from '../../../src/index.ts';
@@ -14,6 +14,13 @@ import {
 
 type LambdaResponse = Awaited<ReturnType<typeof handler>>;
 
+interface RecordedGitHubRequest {
+  method: string;
+  url: string;
+  headers: Headers;
+  jsonBody: Record<string, unknown> | undefined;
+}
+
 const loadWebhookFixture = (): PullRequestPayload =>
   JSON.parse(
     readFileSync(
@@ -22,12 +29,21 @@ const loadWebhookFixture = (): PullRequestPayload =>
     ),
   ) as PullRequestPayload;
 
-const buildSuccessfulWebhookPayload = (): PullRequestPayload => {
+const buildSuccessfulWebhookPayload = (
+  contentOverrides: {
+    title?: string;
+    body?: string | null;
+  } = {},
+): PullRequestPayload => {
   const payload = loadWebhookFixture();
   const existingLabels = payload.pull_request.labels ?? [];
 
   payload.number = 42;
   payload.pull_request.number = 42;
+  payload.pull_request.title =
+    contentOverrides.title ?? 'Feature: validate pull request events';
+  payload.pull_request.body =
+    contentOverrides.body ?? 'This change keeps the webhook payload strict.';
   payload.pull_request.head.ref = 'feature/lambda-integration-tests';
   payload.pull_request.head.sha = '0123456789abcdef0123456789abcdef01234567';
   payload.pull_request.base.ref = 'main';
@@ -49,6 +65,125 @@ const parseJsonBody = (response: LambdaResponse): Record<string, unknown> => {
 
   return JSON.parse(response.body ?? '{}') as Record<string, unknown>;
 };
+
+const getRecordedRequest = (
+  requests: RecordedGitHubRequest[],
+  index: number,
+): RecordedGitHubRequest => {
+  const request = requests[index];
+
+  expect(request).toBeDefined();
+
+  if (!request) {
+    throw new Error(`Missing recorded GitHub request at index ${index}.`);
+  }
+
+  return request;
+};
+
+const createJsonResponse = (
+  body: unknown,
+  status: number,
+): Response =>
+  new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      'content-type': 'application/json',
+    },
+  });
+
+const createGitHubApiFetchMock = (): {
+  fetchMock: ReturnType<typeof vi.fn>;
+  requests: RecordedGitHubRequest[];
+} => {
+  const requests: RecordedGitHubRequest[] = [];
+  const filesUrl =
+    'https://api.github.com/repos/octo-org/pr-concierge/pulls/42/files?per_page=100&page=1';
+  const createCheckRunUrl =
+    'https://api.github.com/repos/octo-org/pr-concierge/check-runs';
+  const updateCheckRunUrl =
+    'https://api.github.com/repos/octo-org/pr-concierge/check-runs/7001';
+
+  const fetchMock = vi.fn(
+    async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+      const request = new Request(input, init);
+      const bodyText = request.method === 'GET' ? undefined : await request.clone().text();
+
+      requests.push({
+        method: request.method,
+        url: request.url,
+        headers: request.headers,
+        jsonBody: bodyText
+          ? (JSON.parse(bodyText) as Record<string, unknown>)
+          : undefined,
+      });
+
+      if (request.url === createCheckRunUrl && request.method === 'POST') {
+        return createJsonResponse({ id: 7001 }, 201);
+      }
+
+      if (request.url === filesUrl && request.method === 'GET') {
+        return createJsonResponse(
+          [
+            {
+              filename: 'src/services/evaluatePullRequest.ts',
+              status: 'modified',
+              additions: 10,
+              deletions: 2,
+              changes: 12,
+            },
+            {
+              filename: 'README.md',
+              status: 'modified',
+              additions: 2,
+              deletions: 0,
+              changes: 2,
+            },
+          ],
+          200,
+        );
+      }
+
+      if (request.url === updateCheckRunUrl && request.method === 'PATCH') {
+        return createJsonResponse({ id: 7001 }, 200);
+      }
+
+      throw new Error(`Unexpected GitHub API request: ${request.method} ${request.url}`);
+    },
+  );
+
+  return { fetchMock, requests };
+};
+
+const runSignedWebhook = async (
+  payload: PullRequestPayload,
+  requestId: string,
+): Promise<LambdaResponse> => {
+  const rawBody = JSON.stringify(payload);
+
+  return handler(
+    buildHttpApiV2Event({
+      method: 'POST',
+      path: '/webhooks/github',
+      headers: {
+        'content-type': 'application/json',
+        'x-github-delivery': 'delivery-42',
+        'x-hub-signature-256': createGitHubSignature(
+          rawBody,
+          localTestEnvDefaults.GITHUB_WEBHOOK_SECRET,
+        ),
+      },
+      body: rawBody,
+    }),
+    createLambdaContext(requestId),
+  );
+};
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+});
 
 describe('local Lambda webhook integration', () => {
   it('rejects requests with an empty body', async () => {
@@ -172,68 +307,22 @@ describe('local Lambda webhook integration', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('evaluates a signed opened webhook with mocked GitHub file data', async () => {
+  it('creates and completes a GitHub check run when the PR text says CVS is Rock', async () => {
     applyLocalTestEnv();
 
-    const payload = buildSuccessfulWebhookPayload();
-    const rawBody = JSON.stringify(payload);
-    const fetchMock = vi.fn(
-      async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
-        const request = new Request(input, init);
-
-        expect(request.url).toBe(
-          'https://api.github.com/repos/octo-org/pr-concierge/pulls/42/files?per_page=100&page=1',
-        );
-        expect(request.headers.get('authorization')).toBe(
-          'Bearer local-test-github-token',
-        );
-
-        return new Response(
-          JSON.stringify([
-            {
-              filename: 'src/services/evaluatePullRequest.ts',
-              status: 'modified',
-              additions: 10,
-              deletions: 2,
-              changes: 12,
-            },
-            {
-              filename: 'README.md',
-              status: 'modified',
-              additions: 2,
-              deletions: 0,
-              changes: 2,
-            },
-          ]),
-          {
-            status: 200,
-            headers: {
-              'content-type': 'application/json',
-            },
-          },
-        );
-      },
-    );
+    const payload = buildSuccessfulWebhookPayload({
+      body: 'This change proves that CVS is Rock.',
+    });
+    const { fetchMock, requests } = createGitHubApiFetchMock();
 
     vi.stubGlobal('fetch', fetchMock);
 
-    const response = await handler(
-      buildHttpApiV2Event({
-        method: 'POST',
-        path: '/webhooks/github',
-        headers: {
-          'content-type': 'application/json',
-          'x-github-delivery': 'delivery-42',
-          'x-hub-signature-256': createGitHubSignature(
-            rawBody,
-            localTestEnvDefaults.GITHUB_WEBHOOK_SECRET,
-          ),
-        },
-        body: rawBody,
-      }),
-      createLambdaContext('local-success-request-id'),
-    );
+    const response = await runSignedWebhook(payload, 'local-success-request-id');
     const body = parseJsonBody(response);
+
+    const checkRunCreateRequest = getRecordedRequest(requests, 0);
+    const filesLookupRequest = getRecordedRequest(requests, 1);
+    const checkRunUpdateRequest = getRecordedRequest(requests, 2);
 
     expect(response.statusCode).toBe(200);
     expect(body).toMatchObject({
@@ -245,8 +334,105 @@ describe('local Lambda webhook integration', () => {
         pk: 'octo-org/pr-concierge#42',
       },
     });
-    expect(typeof body.summary).toBe('string');
-    expect(Array.isArray(body.checks)).toBe(true);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(body.summary).toContain('cvs phrase: pass');
+    expect(body.checks).toContainEqual({
+      name: 'cvs phrase',
+      status: 'pass',
+      details: 'PR text includes "CVS is Rock".',
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(requests.map((request) => `${request.method} ${request.url}`)).toEqual([
+      'POST https://api.github.com/repos/octo-org/pr-concierge/check-runs',
+      'GET https://api.github.com/repos/octo-org/pr-concierge/pulls/42/files?per_page=100&page=1',
+      'PATCH https://api.github.com/repos/octo-org/pr-concierge/check-runs/7001',
+    ]);
+    expect(checkRunCreateRequest.headers.get('authorization')).toBe(
+      'Bearer local-test-github-token',
+    );
+    expect(checkRunCreateRequest.jsonBody).toMatchObject({
+      name: 'pr-concierge',
+      head_sha: '0123456789abcdef0123456789abcdef01234567',
+      status: 'in_progress',
+      external_id: 'delivery-42',
+      output: {
+        title: 'PR Concierge is evaluating this pull request',
+      },
+    });
+    expect(filesLookupRequest.headers.get('authorization')).toBe(
+      'Bearer local-test-github-token',
+    );
+    expect(checkRunUpdateRequest.jsonBody).toMatchObject({
+      name: 'pr-concierge',
+      status: 'completed',
+      conclusion: 'success',
+      output: {
+        title: 'PR Concierge passed',
+      },
+    });
+    expect(checkRunUpdateRequest.jsonBody?.output).toMatchObject({
+      summary: expect.stringContaining('Checks: 2 passed, 0 failed, 0 warned, 1 skipped'),
+      text: expect.stringContaining('cvs phrase: pass'),
+    });
+  });
+
+  it('completes the GitHub check run with failure when the PR text says CVS is not Rock', async () => {
+    applyLocalTestEnv();
+
+    const payload = buildSuccessfulWebhookPayload({
+      body: 'Please note that CVS is not Rock.',
+    });
+    const { fetchMock, requests } = createGitHubApiFetchMock();
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await runSignedWebhook(payload, 'local-cvs-failure-request-id');
+    const body = parseJsonBody(response);
+
+    expect(response.statusCode).toBe(200);
+    expect(body.summary).toContain('cvs phrase: fail');
+    expect(body.checks).toContainEqual({
+      name: 'cvs phrase',
+      status: 'fail',
+      details:
+        'PR text says "CVS is not Rock". Remove the opposite phrase or replace it with "CVS is Rock".',
+    });
+    expect(requests[2]?.jsonBody).toMatchObject({
+      conclusion: 'failure',
+      output: {
+        title: 'PR Concierge found issues',
+      },
+    });
+    expect(requests[2]?.jsonBody?.output).toMatchObject({
+      summary: expect.stringContaining('Next step: update the PR title or description to remove "CVS is not Rock"'),
+      text: expect.stringContaining('cvs phrase: fail'),
+    });
+  });
+
+  it('keeps the CVS rule non-blocking when the PR text does not mention either phrase', async () => {
+    applyLocalTestEnv();
+
+    const payload = buildSuccessfulWebhookPayload({
+      body: 'This change improves the webhook pipeline without the easter egg.',
+    });
+    const { fetchMock, requests } = createGitHubApiFetchMock();
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await runSignedWebhook(payload, 'local-cvs-skip-request-id');
+    const body = parseJsonBody(response);
+
+    expect(response.statusCode).toBe(200);
+    expect(body.summary).toContain('cvs phrase: skip');
+    expect(body.checks).toContainEqual({
+      name: 'cvs phrase',
+      status: 'skip',
+      details: 'PR text does not mention either CVS phrase.',
+    });
+    expect(requests[2]?.jsonBody).toMatchObject({
+      conclusion: 'success',
+      output: {
+        title: 'PR Concierge passed',
+      },
+    });
   });
 });

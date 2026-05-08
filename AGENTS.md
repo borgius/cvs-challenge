@@ -3,7 +3,7 @@
 ## Project overview
 
 PR Concierge is a small TypeScript service for pull request hygiene and release awareness.
-It accepts GitHub pull request webhooks, validates the signature, fetches changed files from the GitHub API, applies deterministic checks, scores risk, and returns a short summary.
+It accepts GitHub pull request webhooks, validates the signature, fetches changed files from the GitHub API, applies deterministic checks, scores risk, publishes a `pr-concierge` GitHub check run for supported PR events, and returns a short summary.
 
 The current application surface is:
 
@@ -27,7 +27,7 @@ Important: the planning docs are slightly ahead of the implementation. For examp
 - `src/app.ts` — Hono app, middleware, route handlers, webhook orchestration
 - `src/index.ts` — local Node server bootstrap and AWS Lambda `handler` export
 - `src/config/env.ts` — environment variable loading and validation
-- `src/github/` — GitHub signature validation and changed-file API client
+- `src/github/` — GitHub signature validation, changed-file API clients, and check publication helpers
 - `src/services/evaluatePullRequest.ts` — PR evaluation workflow
 - `src/risk/classifier.ts` — deterministic risk classification rules
 - `src/storage/evaluationRepository.ts` — persistence interface and placeholder repository
@@ -62,7 +62,7 @@ Use `.env.example` as the canonical template. `.env` is gitignored.
 Keep `.env` focused on app runtime values and the small set of deployment secrets that still become Lambda environment variables:
 
 - `GITHUB_WEBHOOK_SECRET` — required for webhook signature validation and reused by `scripts/configure-self-webhook.sh` when the repository explicitly manages its own webhook
-- `GITHUB_TOKEN` — required for GitHub API file lookups in the Lambda runtime; do not reuse it as the repository-admin token for webhook management
+- `GITHUB_TOKEN` — required for GitHub API file lookups and GitHub check-run publication in the Lambda runtime; use a supported token type with `Checks` repository permission (write), such as a GitHub App installation token or a fine-grained PAT, and do not reuse it as the repository-admin token for webhook management
 - `AWS_REGION` — optional, defaults to `us-east-1`
 - `EVALUATIONS_TABLE_NAME` — required by `loadAppConfig()`
 - `RAW_EVENT_BUCKET_NAME` — optional
@@ -87,7 +87,7 @@ Supported AWS authentication paths are the standard AWS credential-chain options
 Notes:
 
 - `GET /health` can run without the required webhook secrets because config loading happens inside the webhook handler.
-- `POST /webhooks/github` will fail at runtime if required environment variables are missing.
+- `POST /webhooks/github` will fail at runtime if required environment variables are missing or if the runtime GitHub token cannot publish the `pr-concierge` check run.
 - `scripts/configure-self-webhook.sh` expects the same `GITHUB_WEBHOOK_SECRET`, but it uses a separate GitHub operator-auth lane: either `gh auth login` as a repository admin or `GH_TOKEN` with `Webhooks: write`.
 - Never commit real secrets, personal identifiers, or live cloud resource IDs. Use placeholders in docs and examples.
 
@@ -95,9 +95,9 @@ Notes:
 
 - The main entrypoint for behavior changes is usually `src/app.ts`.
 - New PR evaluation rules should stay deterministic unless the repo explicitly adds a runtime AI integration.
-- Keep webhook parsing, validation, and risk evaluation separate. The current split is:
+- Keep webhook parsing, validation, GitHub API integration, and risk evaluation separate. The current split is:
   - request parsing and HTTP responses in `src/app.ts`
-  - GitHub API interaction in `src/github/`
+  - GitHub API interaction, including check publication, in `src/github/`
   - risk logic in `src/risk/`
   - orchestration in `src/services/`
   - persistence behind `src/storage/`
@@ -111,6 +111,7 @@ The repo now uses Vitest for integration coverage.
 `npm run test` type-checks the production source, type-checks the Vitest harness, and runs the local Lambda integration suite.
 `npm run test:integration:deployed` runs the deployed HTTP API suite and expects either `DEPLOYED_HEALTH_URL` / `DEPLOYED_WEBHOOK_URL` or `.artifacts/<service>-deployment.json`.
 The deployed suite keeps its default checks safe by covering `GET /health`, empty-body webhook rejection, and invalid-signature rejection. A real deployed webhook success-path case is opt-in and skipped unless `DEPLOYED_WEBHOOK_SECRET`, `DEPLOYED_PR_REPOSITORY`, and `DEPLOYED_PR_NUMBER` are set.
+The local Lambda suite now also verifies the mocked GitHub check-run create/update flow and the pass/fail/skip outcomes of the CVS phrase rule.
 
 Self-dogfooding notes:
 
@@ -178,6 +179,7 @@ The workflow deploy path intentionally still runs through `scripts/bootstrap-tof
 
 - Preserve GitHub webhook signature validation in `src/github/signature.ts` and `src/app.ts`.
 - Keep secrets in `.env` locally and in secret managers or CI configuration remotely.
+- Keep the runtime `GITHUB_TOKEN` on a supported GitHub Checks auth lane with `Checks` write permission if you expect live check publication.
 - Keep GitHub repository-admin auth for webhook management separate from the Lambda runtime `GITHUB_TOKEN`. Use GitHub CLI auth or a dedicated `GH_TOKEN` when running `scripts/configure-self-webhook.sh`.
 - Keep AWS provider and backend credentials out of `.env`, `*.auto.tfvars`, and `*.s3.tfbackend` files. Use the AWS credential chain instead.
 - Remember that the GitHub secrets still land in OpenTofu state today because the Lambda resource persists them as environment variables. Protect the backend bucket and lock table accordingly.
