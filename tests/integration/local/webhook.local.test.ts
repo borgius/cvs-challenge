@@ -17,10 +17,32 @@ type LambdaResponse = Awaited<ReturnType<typeof handler>>;
 const loadWebhookFixture = (): PullRequestPayload =>
   JSON.parse(
     readFileSync(
-      new URL('../fixtures/github-pull-request-opened.json', import.meta.url),
+      new URL('../fixtures/github-pull-request-opened.official.json', import.meta.url),
       'utf8',
     ),
   ) as PullRequestPayload;
+
+const buildSuccessfulWebhookPayload = (): PullRequestPayload => {
+  const payload = loadWebhookFixture();
+  const existingLabels = payload.pull_request.labels ?? [];
+
+  payload.number = 42;
+  payload.pull_request.number = 42;
+  payload.pull_request.head.ref = 'feature/lambda-integration-tests';
+  payload.pull_request.head.sha = '0123456789abcdef0123456789abcdef01234567';
+  payload.pull_request.base.ref = 'main';
+  payload.pull_request.labels = existingLabels.length > 0
+    ? [{ ...existingLabels[0], name: 'safe-to-deploy' }]
+    : [{ name: 'safe-to-deploy' }];
+  payload.repository.full_name = 'octo-org/pr-concierge';
+  payload.repository.owner = {
+    ...payload.repository.owner,
+    login: 'octo-org',
+  };
+  payload.repository.name = 'pr-concierge';
+
+  return payload;
+};
 
 const parseJsonBody = (response: LambdaResponse): Record<string, unknown> => {
   expect(response.body).toBeDefined();
@@ -80,7 +102,7 @@ describe('local Lambda webhook integration', () => {
     applyLocalTestEnv();
 
     const payload = loadWebhookFixture();
-    payload.action = 'closed';
+    payload.action = 'unlocked';
 
     const rawBody = JSON.stringify(payload);
     const fetchMock = vi.fn();
@@ -106,9 +128,46 @@ describe('local Lambda webhook integration', () => {
 
     expect(response.statusCode).toBe(202);
     expect(body).toMatchObject({
-      message: "Ignoring pull request action 'closed'.",
+      message: "Ignoring pull request action 'unlocked'.",
       requestId: 'local-unsupported-action-request-id',
       supportedActions: ['opened', 'synchronize', 'reopened'],
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects webhook bodies that fail the official pull_request schema', async () => {
+    applyLocalTestEnv();
+
+    const payload = loadWebhookFixture() as unknown as Record<string, unknown>;
+
+    delete payload.sender;
+
+    const rawBody = JSON.stringify(payload);
+    const fetchMock = vi.fn();
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await handler(
+      buildHttpApiV2Event({
+        method: 'POST',
+        path: '/webhooks/github',
+        headers: {
+          'content-type': 'application/json',
+          'x-hub-signature-256': createGitHubSignature(
+            rawBody,
+            localTestEnvDefaults.GITHUB_WEBHOOK_SECRET,
+          ),
+        },
+        body: rawBody,
+      }),
+      createLambdaContext('local-invalid-payload-request-id'),
+    );
+    const body = parseJsonBody(response);
+
+    expect(response.statusCode).toBe(400);
+    expect(body).toMatchObject({
+      message: 'Invalid GitHub pull request payload.',
+      requestId: 'local-invalid-payload-request-id',
     });
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -116,7 +175,7 @@ describe('local Lambda webhook integration', () => {
   it('evaluates a signed opened webhook with mocked GitHub file data', async () => {
     applyLocalTestEnv();
 
-    const payload = loadWebhookFixture();
+    const payload = buildSuccessfulWebhookPayload();
     const rawBody = JSON.stringify(payload);
     const fetchMock = vi.fn(
       async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
