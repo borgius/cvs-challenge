@@ -90,7 +90,10 @@ Keep `.env` for application runtime values and the small set of deployment secre
 | Variable | Required | Purpose |
 | --- | --- | --- |
 | `GITHUB_WEBHOOK_SECRET` | Yes | Validates the `x-hub-signature-256` header from GitHub, feeds `TF_VAR_github_webhook_secret` during deploy and destroy if you do not export it directly, and is reused by `scripts/configure-self-webhook.sh` when you explicitly configure this repository's managed webhook |
-| `GITHUB_TOKEN` | Yes | Reads changed files from the GitHub REST API, publishes the `pr-concierge` check run, and feeds `TF_VAR_github_token` during deploy and destroy if you do not export it directly; use a supported token type with `Checks` repository permission (write), such as a GitHub App installation token or a fine-grained PAT, and keep it separate from the repository-admin token used for webhook management |
+| `GITHUB_APP_ID` | Yes for live check publication | GitHub App ID used to mint installation tokens for GitHub check publication; the deploy script feeds it into `TF_VAR_github_app_id` if you do not export that variable directly |
+| `GITHUB_APP_PRIVATE_KEY` | Yes for live check publication | GitHub App private key used to mint installation tokens for GitHub check publication; the deploy script feeds it into `TF_VAR_github_app_private_key` if you do not export that variable directly |
+| `GITHUB_APP_INSTALLATION_ID` | No | Optional GitHub App installation ID. Leave it blank to let the app resolve the repository installation automatically, or export `TF_VAR_github_app_installation_id` during deploy if you prefer an explicit value |
+| `GITHUB_TOKEN` | No | Optional fallback token for changed-file lookups. If it is absent, PR Concierge reuses the GitHub App installation token for file reads as well. `GITHUB_TOKEN` alone is not enough for live check publication |
 | `AWS_REGION` | No | Default AWS region for the local app and AWS SDK clients |
 | `EVALUATIONS_TABLE_NAME` | Yes | Target DynamoDB table name for the app runtime |
 | `RAW_EVENT_BUCKET_NAME` | No | Optional S3 bucket name for raw webhook archiving |
@@ -123,12 +126,11 @@ GitHub controls the icon that appears in the UI from the check status and conclu
 
 Local integration tests mock GitHub HTTP calls, so they prove the code path without proving that your live token can publish checks.
 
-For real GitHub check publication, `GITHUB_TOKEN` must be a token type that GitHub accepts for `Checks` write in your environment, such as:
+For real GitHub check publication, configure `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY` so the Lambda runtime can mint a repository installation token before it calls the Checks API.
 
-- a GitHub App installation token
-- a fine-grained personal access token with `Checks` repository permission set to `write`
+`GITHUB_APP_INSTALLATION_ID` is optional. If you omit it, the app resolves the installation from the target repository at runtime.
 
-Classic personal access tokens are not enough for check-run updates. If the runtime token cannot create or update check runs, `POST /webhooks/github` will fail instead of silently downgrading to a commit status.
+`GITHUB_TOKEN` alone is not enough for live check publication in this repo's runtime path. If GitHub App auth is missing, `POST /webhooks/github` fails with a clear configuration error instead of silently downgrading to a commit status.
 
 ## OpenTofu root variables
 
@@ -172,7 +174,8 @@ Prerequisites:
 - either existing backend resources or the ability to run `scripts/bootstrap-tofu-backend.sh` once first
 - a local `infra/terraform/env/<env>.auto.tfvars` file for non-secret root inputs
 - a local `infra/terraform/backend/<env>.s3.tfbackend` file for backend coordinates
-- either `.env` values for `GITHUB_WEBHOOK_SECRET` and `GITHUB_TOKEN` or direct `TF_VAR_github_webhook_secret` and `TF_VAR_github_token` exports
+- `.env` values for `GITHUB_WEBHOOK_SECRET`, `GITHUB_APP_ID`, and `GITHUB_APP_PRIVATE_KEY`, or direct `TF_VAR_github_webhook_secret`, `TF_VAR_github_app_id`, and `TF_VAR_github_app_private_key` exports
+- optional `.env` values for `GITHUB_APP_INSTALLATION_ID` and `GITHUB_TOKEN`, or direct `TF_VAR_github_app_installation_id` and `TF_VAR_github_token` exports
 - `jq`
 - `zip`
 - `npm`
@@ -200,7 +203,7 @@ Prerequisites:
 - GitHub repository-admin auth through either `gh auth login` or `GH_TOKEN` from a fine-grained token with `Webhooks: write`
 
 The script intentionally keeps GitHub repository-admin auth separate from the
-Lambda runtime `GITHUB_TOKEN`. It reuses the deployed `webhookUrl` from
+Lambda runtime GitHub App credentials and any optional `GITHUB_TOKEN` fallback. It reuses the deployed `webhookUrl` from
 `.artifacts/<service>-deployment.json`, configures only the `pull_request`
 event, and always includes the secret on update so GitHub does not clear it.
 
@@ -261,7 +264,10 @@ On pushes to `main` and manual dispatches, it:
 Configure these GitHub Actions repository secrets before using that workflow:
 
 - `AWS_DEPLOY_ROLE_ARN` — IAM role ARN assumed by GitHub Actions through OIDC
-- `PR_CONCIERGE_GITHUB_TOKEN` — GitHub token injected into Lambda for changed-file lookups and GitHub check publication; it must support `Checks` write for live PR feedback
+- `PR_CONCIERGE_GITHUB_APP_ID` — GitHub App ID injected into Lambda for GitHub check publication
+- `PR_CONCIERGE_GITHUB_APP_PRIVATE_KEY` — GitHub App private key injected into Lambda so it can mint installation tokens
+- `PR_CONCIERGE_GITHUB_APP_INSTALLATION_ID` — optional explicit installation ID if you do not want repository-based installation lookup
+- `PR_CONCIERGE_GITHUB_TOKEN` — optional fallback token for changed-file lookups
 - `PR_CONCIERGE_WEBHOOK_SECRET` — webhook secret injected into Lambda and reused by optional deployed webhook tests
 
 Notes:
@@ -272,7 +278,7 @@ Notes:
 - The deploy and destroy scripts stop early with a clear error if `tofu` is not installed or if the local tfvars and backend files are missing.
 - The scripts keep AWS credentials on the AWS credential chain. Do not put AWS access keys, session tokens, or profile secrets in `.env`, `*.auto.tfvars`, or `*.s3.tfbackend` files.
 - The root OpenTofu module emits a `deployment_summary` output, and `scripts/deploy.sh` persists it to `.artifacts/<service>-deployment.json` for operators and follow-on scripts.
-- If `GITHUB_WEBHOOK_SECRET` or `GITHUB_TOKEN` still use placeholder values, deployment can still complete, but real webhook processing will not be useful yet.
+- If `GITHUB_WEBHOOK_SECRET`, `GITHUB_APP_ID`, or `GITHUB_APP_PRIVATE_KEY` still use placeholder values, deployment will stop early because the deployed runtime cannot publish GitHub checks without GitHub App auth.
 - `allowed_account_ids` is available as an optional provider safety rail if you want the root module to refuse the wrong AWS account.
 - GitHub secrets are still stored in OpenTofu state today because the Lambda function persists them as environment variables. `sensitive = true` redacts CLI output, but it does not remove the raw values from state. Protect the state bucket and lock table accordingly. Moving those secrets to Secrets Manager or SSM is the follow-up hardening path.
 

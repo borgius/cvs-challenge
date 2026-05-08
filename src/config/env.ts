@@ -3,7 +3,10 @@ export type EvaluationRepositoryMode = 'console' | 'dynamodb';
 export interface AppConfig {
   awsRegion: string;
   githubWebhookSecret: string;
-  githubToken: string;
+  githubToken: string | undefined;
+  githubAppId: string | undefined;
+  githubAppPrivateKey: string | undefined;
+  githubAppInstallationId: number | undefined;
   evaluationsTableName: string;
   rawEventBucketName: string | undefined;
   enableRawEventArchive: boolean;
@@ -24,6 +27,22 @@ const getRequiredEnv = (name: string): string => {
 const getOptionalEnv = (name: string): string | undefined => {
   const value = process.env[name]?.trim();
   return value ? value : undefined;
+};
+
+const parseOptionalPositiveInteger = (name: string): number | undefined => {
+  const value = getOptionalEnv(name);
+
+  if (!value) {
+    return undefined;
+  }
+
+  const parsedValue = Number.parseInt(value, 10);
+
+  if (!Number.isInteger(parsedValue) || parsedValue <= 0) {
+    throw new Error(`Invalid ${name} value '${value}'. Use a positive integer.`);
+  }
+
+  return parsedValue;
 };
 
 const parseBoolean = (value: string | undefined): boolean => value?.toLowerCase() === 'true';
@@ -52,13 +71,43 @@ const parseEvaluationRepository = (
   );
 };
 
-export const loadAppConfig = (): AppConfig => ({
-  awsRegion: process.env.AWS_REGION?.trim() || 'us-east-1',
-  githubWebhookSecret: getRequiredEnv('GITHUB_WEBHOOK_SECRET'),
-  githubToken: getRequiredEnv('GITHUB_TOKEN'),
-  evaluationsTableName: getRequiredEnv('EVALUATIONS_TABLE_NAME'),
-  rawEventBucketName: getOptionalEnv('RAW_EVENT_BUCKET_NAME'),
-  enableRawEventArchive: parseBoolean(process.env.ENABLE_RAW_EVENT_ARCHIVE),
-  requiredLabels: parseCsv(process.env.REQUIRED_LABELS),
-  evaluationRepository: parseEvaluationRepository(process.env.EVALUATION_REPOSITORY),
-});
+const validateGitHubAuthConfig = (config: AppConfig): AppConfig => {
+  const hasGitHubToken = Boolean(config.githubToken);
+  const hasGitHubAppId = Boolean(config.githubAppId);
+  const hasGitHubAppPrivateKey = Boolean(config.githubAppPrivateKey);
+
+  if (hasGitHubAppId !== hasGitHubAppPrivateKey) {
+    throw new Error(
+      'Set both GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY to enable GitHub App authentication.',
+    );
+  }
+
+  if (config.githubAppInstallationId !== undefined && !hasGitHubAppId) {
+    throw new Error(
+      'GITHUB_APP_INSTALLATION_ID requires GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY.',
+    );
+  }
+
+  if (!hasGitHubToken && !hasGitHubAppId) {
+    throw new Error(
+      'Missing GitHub authentication. Configure GITHUB_TOKEN or GitHub App credentials.',
+    );
+  }
+
+  return config;
+};
+
+export const loadAppConfig = (): AppConfig =>
+  validateGitHubAuthConfig({
+    awsRegion: process.env.AWS_REGION?.trim() || 'us-east-1',
+    githubWebhookSecret: getRequiredEnv('GITHUB_WEBHOOK_SECRET'),
+    githubToken: getOptionalEnv('GITHUB_TOKEN'),
+    githubAppId: getOptionalEnv('GITHUB_APP_ID'),
+    githubAppPrivateKey: getOptionalEnv('GITHUB_APP_PRIVATE_KEY'),
+    githubAppInstallationId: parseOptionalPositiveInteger('GITHUB_APP_INSTALLATION_ID'),
+    evaluationsTableName: getRequiredEnv('EVALUATIONS_TABLE_NAME'),
+    rawEventBucketName: getOptionalEnv('RAW_EVENT_BUCKET_NAME'),
+    enableRawEventArchive: parseBoolean(process.env.ENABLE_RAW_EVENT_ARCHIVE),
+    requiredLabels: parseCsv(process.env.REQUIRED_LABELS),
+    evaluationRepository: parseEvaluationRepository(process.env.EVALUATION_REPOSITORY),
+  });

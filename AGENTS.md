@@ -62,7 +62,10 @@ Use `.env.example` as the canonical template. `.env` is gitignored.
 Keep `.env` focused on app runtime values and the small set of deployment secrets that still become Lambda environment variables:
 
 - `GITHUB_WEBHOOK_SECRET` — required for webhook signature validation and reused by `scripts/configure-self-webhook.sh` when the repository explicitly manages its own webhook
-- `GITHUB_TOKEN` — required for GitHub API file lookups and GitHub check-run publication in the Lambda runtime; use a supported token type with `Checks` repository permission (write), such as a GitHub App installation token or a fine-grained PAT, and do not reuse it as the repository-admin token for webhook management
+- `GITHUB_APP_ID` — required for live GitHub check-run publication
+- `GITHUB_APP_PRIVATE_KEY` — required for live GitHub check-run publication; use the PEM value directly or store it on one line with escaped newlines in `.env`
+- `GITHUB_APP_INSTALLATION_ID` — optional explicit installation ID if you do not want the app to resolve the repository installation at runtime
+- `GITHUB_TOKEN` — optional fallback for changed-file lookups; do not reuse it as the repository-admin token for webhook management
 - `AWS_REGION` — optional, defaults to `us-east-1`
 - `EVALUATIONS_TABLE_NAME` — required by `loadAppConfig()`
 - `RAW_EVENT_BUCKET_NAME` — optional
@@ -87,7 +90,7 @@ Supported AWS authentication paths are the standard AWS credential-chain options
 Notes:
 
 - `GET /health` can run without the required webhook secrets because config loading happens inside the webhook handler.
-- `POST /webhooks/github` will fail at runtime if required environment variables are missing or if the runtime GitHub token cannot publish the `pr-concierge` check run.
+- `POST /webhooks/github` will fail at runtime if required environment variables are missing, if GitHub App auth is absent, or if the configured GitHub App is not installed on the target repository.
 - `scripts/configure-self-webhook.sh` expects the same `GITHUB_WEBHOOK_SECRET`, but it uses a separate GitHub operator-auth lane: either `gh auth login` as a repository admin or `GH_TOKEN` with `Webhooks: write`.
 - Never commit real secrets, personal identifiers, or live cloud resource IDs. Use placeholders in docs and examples.
 
@@ -170,7 +173,10 @@ The GitHub Actions workflows are:
 Repository secrets required by `.github/workflows/deploy.yml`:
 
 - `AWS_DEPLOY_ROLE_ARN`
-- `PR_CONCIERGE_GITHUB_TOKEN`
+- `PR_CONCIERGE_GITHUB_APP_ID`
+- `PR_CONCIERGE_GITHUB_APP_PRIVATE_KEY`
+- `PR_CONCIERGE_GITHUB_APP_INSTALLATION_ID` (optional)
+- `PR_CONCIERGE_GITHUB_TOKEN` (optional fallback)
 - `PR_CONCIERGE_WEBHOOK_SECRET`
 
 The workflow deploy path intentionally still runs through `scripts/bootstrap-tofu-backend.sh` and `scripts/deploy.sh`, so workflow changes should continue to keep those scripts as the source of truth.
@@ -179,8 +185,7 @@ The workflow deploy path intentionally still runs through `scripts/bootstrap-tof
 
 - Preserve GitHub webhook signature validation in `src/github/signature.ts` and `src/app.ts`.
 - Keep secrets in `.env` locally and in secret managers or CI configuration remotely.
-- Keep the runtime `GITHUB_TOKEN` on a supported GitHub Checks auth lane with `Checks` write permission if you expect live check publication.
-- Keep GitHub repository-admin auth for webhook management separate from the Lambda runtime `GITHUB_TOKEN`. Use GitHub CLI auth or a dedicated `GH_TOKEN` when running `scripts/configure-self-webhook.sh`.
+- Keep GitHub repository-admin auth for webhook management separate from the Lambda runtime GitHub App credentials and any optional `GITHUB_TOKEN` fallback. Use GitHub CLI auth or a dedicated `GH_TOKEN` when running `scripts/configure-self-webhook.sh`.
 - Keep AWS provider and backend credentials out of `.env`, `*.auto.tfvars`, and `*.s3.tfbackend` files. Use the AWS credential chain instead.
 - Remember that the GitHub secrets still land in OpenTofu state today because the Lambda resource persists them as environment variables. Protect the backend bucket and lock table accordingly.
 - If you add AWS integrations, document the required IAM permissions and environment variables.

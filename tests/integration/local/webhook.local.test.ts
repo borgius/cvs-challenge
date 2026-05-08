@@ -149,12 +149,15 @@ const createGitHubApiFetchMock = (): {
   requests: RecordedGitHubRequest[];
 } => {
   const requests: RecordedGitHubRequest[] = [];
+  const createInstallationTokenUrl =
+    'https://api.github.com/app/installations/987654/access_tokens';
   const filesUrl =
     'https://api.github.com/repos/octo-org/pr-concierge/pulls/42/files?per_page=100&page=1';
   const createCheckRunUrl =
     'https://api.github.com/repos/octo-org/pr-concierge/check-runs';
   const updateCheckRunUrl =
     'https://api.github.com/repos/octo-org/pr-concierge/check-runs/7001';
+  const installationAccessToken = 'ghs_local_installation_token';
 
   const fetchMock = vi.fn(
     async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
@@ -169,6 +172,16 @@ const createGitHubApiFetchMock = (): {
           ? (JSON.parse(bodyText) as Record<string, unknown>)
           : undefined,
       });
+
+      if (request.url === createInstallationTokenUrl && request.method === 'POST') {
+        return createJsonResponse(
+          {
+            token: installationAccessToken,
+            expires_at: '2099-01-01T00:00:00Z',
+          },
+          201,
+        );
+      }
 
       if (request.url === createCheckRunUrl && request.method === 'POST') {
         return createJsonResponse({ id: 7001 }, 201);
@@ -464,9 +477,10 @@ describe('local Lambda webhook integration', () => {
     const response = await runSignedWebhook(payload, 'local-success-request-id');
     const body = parseJsonBody(response);
 
-    const checkRunCreateRequest = getRecordedRequest(requests, 0);
-    const filesLookupRequest = getRecordedRequest(requests, 1);
-    const checkRunUpdateRequest = getRecordedRequest(requests, 2);
+    const installationTokenRequest = getRecordedRequest(requests, 0);
+    const checkRunCreateRequest = getRecordedRequest(requests, 1);
+    const filesLookupRequest = getRecordedRequest(requests, 2);
+    const checkRunUpdateRequest = getRecordedRequest(requests, 3);
 
     expect(response.statusCode).toBe(200);
     expect(body).toMatchObject({
@@ -484,14 +498,16 @@ describe('local Lambda webhook integration', () => {
       status: 'pass',
       details: 'PR text includes "CVS is Rock".',
     });
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
     expect(requests.map((request) => `${request.method} ${request.url}`)).toEqual([
+      'POST https://api.github.com/app/installations/987654/access_tokens',
       'POST https://api.github.com/repos/octo-org/pr-concierge/check-runs',
       'GET https://api.github.com/repos/octo-org/pr-concierge/pulls/42/files?per_page=100&page=1',
       'PATCH https://api.github.com/repos/octo-org/pr-concierge/check-runs/7001',
     ]);
+    expect(installationTokenRequest.headers.get('authorization')).toContain('.');
     expect(checkRunCreateRequest.headers.get('authorization')).toBe(
-      'Bearer local-test-github-token',
+      'Bearer ghs_local_installation_token',
     );
     expect(checkRunCreateRequest.jsonBody).toMatchObject({
       name: 'pr-concierge',
@@ -504,6 +520,9 @@ describe('local Lambda webhook integration', () => {
     });
     expect(filesLookupRequest.headers.get('authorization')).toBe(
       'Bearer local-test-github-token',
+    );
+    expect(checkRunUpdateRequest.headers.get('authorization')).toBe(
+      'Bearer ghs_local_installation_token',
     );
     expect(checkRunUpdateRequest.jsonBody).toMatchObject({
       name: 'pr-concierge',

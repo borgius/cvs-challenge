@@ -30,10 +30,25 @@ require_file \
   "$TOFU_BACKEND_CONFIG_FILE" \
   "Missing OpenTofu backend config file: ${TOFU_BACKEND_CONFIG_FILE}. Copy infra/terraform/backend/${TOFU_ENVIRONMENT_NAME}.s3.tfbackend.example to that path and fill in the backend coordinates first."
 warn_if_placeholder GITHUB_WEBHOOK_SECRET
-warn_if_placeholder GITHUB_TOKEN
+
+if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+  warn_if_placeholder GITHUB_TOKEN
+fi
+
+warn_if_placeholder GITHUB_APP_ID
+warn_if_placeholder GITHUB_APP_PRIVATE_KEY
+
+if [[ -n "${GITHUB_APP_INSTALLATION_ID:-}" ]]; then
+  warn_if_placeholder GITHUB_APP_INSTALLATION_ID
+fi
+
+require_github_check_runtime_auth_inputs
 
 export_tofu_root_secret_from_env GITHUB_WEBHOOK_SECRET github_webhook_secret
-export_tofu_root_secret_from_env GITHUB_TOKEN github_token
+export_tofu_root_value_from_env_if_present GITHUB_TOKEN github_token
+export_tofu_root_value_from_env_if_present GITHUB_APP_ID github_app_id
+export_tofu_root_value_from_env_if_present GITHUB_APP_PRIVATE_KEY github_app_private_key
+export_tofu_root_value_from_env_if_present GITHUB_APP_INSTALLATION_ID github_app_installation_id
 
 resource_is_managed_in_state() {
   local -r address="$1"
