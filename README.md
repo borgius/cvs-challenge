@@ -25,6 +25,7 @@ Rendered PDF, PNG, and PPTX exports are intentionally not wired by default so br
 - branch naming and optional required-label checks
 - a GitHub-visible `pr-concierge` check run for supported pull request events
 - a deterministic CVS phrase rule: pass on `CVS is Rock`, fail on `CVS is not Rock`, and ignore the phrase when it is absent
+- encrypted SSM Parameter Store runtime indirection for GitHub webhook and auth inputs
 - structured JSON logging
 - DynamoDB-backed evaluation persistence for deployed environments, with console logging available for local development
 - OpenTofu root configuration and local wrapper modules for Lambda, HTTP API, DynamoDB, optional S3, SNS, and CloudWatch alarms
@@ -85,21 +86,28 @@ If the URL overrides and deployment summary are both missing, the deployed suite
 
 ## Environment variables
 
-Keep `.env` for application runtime values and the small set of deployment secrets that still flow into Lambda environment variables. Put ordinary OpenTofu root variables in `infra/terraform/env/<env>.auto.tfvars` instead.
+Keep `.env` for local runtime values and the deployment secrets that OpenTofu stores in encrypted SSM parameters for the deployed Lambda runtime. Put ordinary OpenTofu root variables in `infra/terraform/env/<env>.auto.tfvars` instead.
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
-| `GITHUB_WEBHOOK_SECRET` | Yes | Validates the `x-hub-signature-256` header from GitHub, feeds `TF_VAR_github_webhook_secret` during deploy and destroy if you do not export it directly, and is reused by `scripts/configure-self-webhook.sh` when you explicitly configure this repository's managed webhook |
-| `GITHUB_APP_ID` | Yes for live check publication | GitHub App ID used to mint installation tokens for GitHub check publication; the deploy script feeds it into `TF_VAR_github_app_id` if you do not export that variable directly |
-| `GITHUB_APP_PRIVATE_KEY` | Yes for live check publication | GitHub App private key used to mint installation tokens for GitHub check publication; the deploy script feeds it into `TF_VAR_github_app_private_key` if you do not export that variable directly |
-| `GITHUB_APP_INSTALLATION_ID` | No | Optional GitHub App installation ID. Leave it blank to let the app resolve the repository installation automatically, or export `TF_VAR_github_app_installation_id` during deploy if you prefer an explicit value |
-| `GITHUB_TOKEN` | No | Optional fallback token for changed-file lookups. If it is absent, PR Concierge reuses the GitHub App installation token for file reads as well. `GITHUB_TOKEN` alone is not enough for live check publication |
+| `GITHUB_WEBHOOK_SECRET` | Yes for local direct-env runtime and deploys | Validates the `x-hub-signature-256` header from GitHub for local runs, feeds `TF_VAR_github_webhook_secret` during deploy and destroy if you do not export it directly, populates the deployed webhook secret SSM parameter, and is reused by `scripts/configure-self-webhook.sh` when you explicitly configure this repository's managed webhook |
+| `GITHUB_APP_ID` | Yes for local direct-env GitHub App auth and deploys | GitHub App ID used to mint installation tokens for GitHub check publication in local direct-env runs, and fed into `TF_VAR_github_app_id` during deploy so OpenTofu can store the deployed runtime value in encrypted SSM Parameter Store |
+| `GITHUB_APP_PRIVATE_KEY` | Yes for local direct-env GitHub App auth and deploys | GitHub App private key used to mint installation tokens for local direct-env runs, and fed into `TF_VAR_github_app_private_key` during deploy so OpenTofu can store the deployed runtime value in encrypted SSM Parameter Store |
+| `GITHUB_APP_INSTALLATION_ID` | No | Optional GitHub App installation ID for local direct-env runs or deploys. Leave it blank to let the app resolve the repository installation automatically |
+| `GITHUB_TOKEN` | No | Optional fallback token for changed-file lookups. If it is absent, PR Concierge reuses the GitHub App installation token for file reads as well. When set during deploy, OpenTofu stores it in encrypted SSM Parameter Store for the deployed runtime |
+| `GITHUB_WEBHOOK_SECRET_SSM_PARAMETER_NAME` | No | Optional runtime override. When `GITHUB_WEBHOOK_SECRET` is blank and this parameter name is set, the app reads the webhook secret from encrypted SSM Parameter Store at request time |
+| `GITHUB_APP_ID_SSM_PARAMETER_NAME` | No | Optional runtime override for `GITHUB_APP_ID` |
+| `GITHUB_APP_PRIVATE_KEY_SSM_PARAMETER_NAME` | No | Optional runtime override for `GITHUB_APP_PRIVATE_KEY` |
+| `GITHUB_APP_INSTALLATION_ID_SSM_PARAMETER_NAME` | No | Optional runtime override for `GITHUB_APP_INSTALLATION_ID` |
+| `GITHUB_TOKEN_SSM_PARAMETER_NAME` | No | Optional runtime override for `GITHUB_TOKEN` |
 | `AWS_REGION` | No | Default AWS region for the local app and AWS SDK clients |
 | `EVALUATIONS_TABLE_NAME` | Yes | Target DynamoDB table name for the app runtime |
 | `RAW_EVENT_BUCKET_NAME` | No | Optional S3 bucket name for raw webhook archiving |
 | `ENABLE_RAW_EVENT_ARCHIVE` | No | Enables raw event S3 key generation when set to `true` |
 | `REQUIRED_LABELS` | No | Comma-separated labels to enforce, such as `safe-to-deploy,needs-platform-review` |
 | `EVALUATION_REPOSITORY` | No | `console` for local logging or `dynamodb` for deployed persistence |
+
+For deployed Lambda runs, OpenTofu now writes the GitHub runtime values to encrypted SSM parameters and injects only the parameter names into the function environment. The runtime resolves the values from SSM on first use in each warm container and then caches them in memory.
 
 ## GitHub check publication
 
@@ -126,7 +134,7 @@ GitHub controls the icon that appears in the UI from the check status and conclu
 
 Local integration tests mock GitHub HTTP calls, so they prove the code path without proving that your live token can publish checks.
 
-For real GitHub check publication, configure `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY` so the Lambda runtime can mint a repository installation token before it calls the Checks API.
+For real GitHub check publication, configure either `GITHUB_APP_ID` plus `GITHUB_APP_PRIVATE_KEY` directly or the matching `*_SSM_PARAMETER_NAME` variables so the runtime can mint a repository installation token before it calls the Checks API.
 
 `GITHUB_APP_INSTALLATION_ID` is optional. If you omit it, the app resolves the installation from the target repository at runtime.
 
@@ -174,7 +182,7 @@ Prerequisites:
 - either existing backend resources or the ability to run `scripts/bootstrap-tofu-backend.sh` once first
 - a local `infra/terraform/env/<env>.auto.tfvars` file for non-secret root inputs
 - a local `infra/terraform/backend/<env>.s3.tfbackend` file for backend coordinates
-- `.env` values for `GITHUB_WEBHOOK_SECRET`, `GITHUB_APP_ID`, and `GITHUB_APP_PRIVATE_KEY`, or direct `TF_VAR_github_webhook_secret`, `TF_VAR_github_app_id`, and `TF_VAR_github_app_private_key` exports
+- `.env` values for `GITHUB_WEBHOOK_SECRET`, `GITHUB_APP_ID`, and `GITHUB_APP_PRIVATE_KEY`, or direct `TF_VAR_github_webhook_secret`, `TF_VAR_github_app_id`, and `TF_VAR_github_app_private_key` exports so OpenTofu can refresh the encrypted SSM parameters used by the deployed runtime
 - optional `.env` values for `GITHUB_APP_INSTALLATION_ID` and `GITHUB_TOKEN`, or direct `TF_VAR_github_app_installation_id` and `TF_VAR_github_token` exports
 - `jq`
 - `zip`
@@ -264,11 +272,11 @@ On pushes to `main` and manual dispatches, it:
 Configure these GitHub Actions repository secrets before using that workflow:
 
 - `AWS_DEPLOY_ROLE_ARN` — IAM role ARN assumed by GitHub Actions through OIDC
-- `PR_CONCIERGE_GITHUB_APP_ID` — GitHub App ID injected into Lambda for GitHub check publication
-- `PR_CONCIERGE_GITHUB_APP_PRIVATE_KEY` — GitHub App private key injected into Lambda so it can mint installation tokens
+- `PR_CONCIERGE_GITHUB_APP_ID` — GitHub App ID passed to OpenTofu so it can refresh the encrypted SSM parameter used by Lambda at runtime
+- `PR_CONCIERGE_GITHUB_APP_PRIVATE_KEY` — GitHub App private key passed to OpenTofu so it can refresh the encrypted SSM parameter used by Lambda at runtime
 - `PR_CONCIERGE_GITHUB_APP_INSTALLATION_ID` — optional explicit installation ID if you do not want repository-based installation lookup
-- `PR_CONCIERGE_GITHUB_TOKEN` — optional fallback token for changed-file lookups
-- `PR_CONCIERGE_WEBHOOK_SECRET` — webhook secret injected into Lambda and reused by optional deployed webhook tests
+- `PR_CONCIERGE_GITHUB_TOKEN` — optional fallback token for changed-file lookups, passed to OpenTofu so it can refresh the encrypted SSM parameter used by Lambda at runtime
+- `PR_CONCIERGE_WEBHOOK_SECRET` — webhook secret passed to OpenTofu so it can refresh the encrypted SSM parameter used by Lambda at runtime, and reused by optional deployed webhook tests
 
 Notes:
 
@@ -280,7 +288,7 @@ Notes:
 - The root OpenTofu module emits a `deployment_summary` output, and `scripts/deploy.sh` persists it to `.artifacts/<service>-deployment.json` for operators and follow-on scripts.
 - If `GITHUB_WEBHOOK_SECRET`, `GITHUB_APP_ID`, or `GITHUB_APP_PRIVATE_KEY` still use placeholder values, deployment will stop early because the deployed runtime cannot publish GitHub checks without GitHub App auth.
 - `allowed_account_ids` is available as an optional provider safety rail if you want the root module to refuse the wrong AWS account.
-- GitHub secrets are still stored in OpenTofu state today because the Lambda function persists them as environment variables. `sensitive = true` redacts CLI output, but it does not remove the raw values from state. Protect the state bucket and lock table accordingly. Moving those secrets to Secrets Manager or SSM is the follow-up hardening path.
+- GitHub runtime values now land in encrypted SSM Parameter Store for Lambda reads, but they still exist in OpenTofu state because OpenTofu manages the `SecureString` parameter values. `sensitive = true` redacts CLI output, but it does not remove the raw values from state. Protect the state bucket and lock table accordingly. Moving parameter creation outside OpenTofu is the next hardening step.
 
 ## Project layout
 

@@ -1,3 +1,5 @@
+import { GetParametersCommand, SSMClient } from '@aws-sdk/client-ssm';
+
 export type EvaluationRepositoryMode = 'console' | 'dynamodb';
 
 export interface AppConfig {
@@ -14,6 +16,62 @@ export interface AppConfig {
   evaluationRepository: EvaluationRepositoryMode;
 }
 
+type GitHubConfigValueKey =
+  | 'githubWebhookSecret'
+  | 'githubToken'
+  | 'githubAppId'
+  | 'githubAppPrivateKey'
+  | 'githubAppInstallationId';
+
+interface GitHubSsmBinding {
+  directEnvName: string;
+  parameterEnvName: string;
+}
+
+type SsmParameterLoader = (
+  awsRegion: string,
+  parameterNames: string[],
+) => Promise<Map<string, string>>;
+
+const githubSsmBindings: Record<GitHubConfigValueKey, GitHubSsmBinding> = {
+  githubWebhookSecret: {
+    directEnvName: 'GITHUB_WEBHOOK_SECRET',
+    parameterEnvName: 'GITHUB_WEBHOOK_SECRET_SSM_PARAMETER_NAME',
+  },
+  githubToken: {
+    directEnvName: 'GITHUB_TOKEN',
+    parameterEnvName: 'GITHUB_TOKEN_SSM_PARAMETER_NAME',
+  },
+  githubAppId: {
+    directEnvName: 'GITHUB_APP_ID',
+    parameterEnvName: 'GITHUB_APP_ID_SSM_PARAMETER_NAME',
+  },
+  githubAppPrivateKey: {
+    directEnvName: 'GITHUB_APP_PRIVATE_KEY',
+    parameterEnvName: 'GITHUB_APP_PRIVATE_KEY_SSM_PARAMETER_NAME',
+  },
+  githubAppInstallationId: {
+    directEnvName: 'GITHUB_APP_INSTALLATION_ID',
+    parameterEnvName: 'GITHUB_APP_INSTALLATION_ID_SSM_PARAMETER_NAME',
+  },
+};
+
+const ssmClients = new Map<string, SSMClient>();
+
+let appConfigPromise: Promise<AppConfig> | undefined;
+
+const getSsmClient = (awsRegion: string): SSMClient => {
+  const existingClient = ssmClients.get(awsRegion);
+
+  if (existingClient) {
+    return existingClient;
+  }
+
+  const client = new SSMClient({ region: awsRegion });
+  ssmClients.set(awsRegion, client);
+  return client;
+};
+
 const getRequiredEnv = (name: string): string => {
   const value = process.env[name]?.trim();
 
@@ -29,9 +87,10 @@ const getOptionalEnv = (name: string): string | undefined => {
   return value ? value : undefined;
 };
 
-const parseOptionalPositiveInteger = (name: string): number | undefined => {
-  const value = getOptionalEnv(name);
-
+const parseOptionalPositiveIntegerValue = (
+  name: string,
+  value: string | undefined,
+): number | undefined => {
   if (!value) {
     return undefined;
   }
@@ -97,17 +156,140 @@ const validateGitHubAuthConfig = (config: AppConfig): AppConfig => {
   return config;
 };
 
-export const loadAppConfig = (): AppConfig =>
-  validateGitHubAuthConfig({
-    awsRegion: process.env.AWS_REGION?.trim() || 'us-east-1',
-    githubWebhookSecret: getRequiredEnv('GITHUB_WEBHOOK_SECRET'),
-    githubToken: getOptionalEnv('GITHUB_TOKEN'),
-    githubAppId: getOptionalEnv('GITHUB_APP_ID'),
-    githubAppPrivateKey: getOptionalEnv('GITHUB_APP_PRIVATE_KEY'),
-    githubAppInstallationId: parseOptionalPositiveInteger('GITHUB_APP_INSTALLATION_ID'),
+const defaultSsmParameterLoader: SsmParameterLoader = async (
+  awsRegion,
+  parameterNames,
+): Promise<Map<string, string>> => {
+  const uniqueParameterNames = [...new Set(parameterNames)];
+
+  if (uniqueParameterNames.length === 0) {
+    return new Map<string, string>();
+  }
+
+  const response = await getSsmClient(awsRegion).send(
+    new GetParametersCommand({
+      Names: uniqueParameterNames,
+      WithDecryption: true,
+    }),
+  );
+
+  const invalidParameters = response.InvalidParameters ?? [];
+
+  if (invalidParameters.length > 0) {
+    throw new Error(
+      `Missing SSM parameters: ${invalidParameters.join(', ')}.`,
+    );
+  }
+
+  return new Map(
+    (response.Parameters ?? []).flatMap((parameter) =>
+      parameter.Name && parameter.Value
+        ? ([[parameter.Name, parameter.Value]] as const)
+        : [],
+    ),
+  );
+};
+
+let ssmParameterLoader: SsmParameterLoader = defaultSsmParameterLoader;
+
+const getRequiredGitHubConfigValue = (
+  value: string | undefined,
+  directEnvName: string,
+  parameterEnvName: string,
+): string => {
+  if (!value) {
+    throw new Error(
+      `Missing GitHub configuration. Set ${directEnvName} or ${parameterEnvName}.`,
+    );
+  }
+
+  return value;
+};
+
+const loadResolvedGitHubConfigValues = async (
+  awsRegion: string,
+): Promise<Record<GitHubConfigValueKey, string | undefined>> => {
+  const parameterNamesToLoad = Object.values(githubSsmBindings)
+    .map((binding) => getOptionalEnv(binding.parameterEnvName))
+    .filter((parameterName): parameterName is string => parameterName !== undefined);
+  const parameterValues = await ssmParameterLoader(awsRegion, parameterNamesToLoad);
+  const resolvedValues = {} as Record<GitHubConfigValueKey, string | undefined>;
+
+  for (const [key, binding] of Object.entries(githubSsmBindings) as Array<
+    [GitHubConfigValueKey, GitHubSsmBinding]
+  >) {
+    const directValue = getOptionalEnv(binding.directEnvName);
+
+    if (directValue !== undefined) {
+      resolvedValues[key] = directValue;
+      continue;
+    }
+
+    const parameterName = getOptionalEnv(binding.parameterEnvName);
+
+    if (!parameterName) {
+      resolvedValues[key] = undefined;
+      continue;
+    }
+
+    const parameterValue = parameterValues.get(parameterName)?.trim();
+
+    if (!parameterValue) {
+      throw new Error(`Missing value for SSM parameter: ${parameterName}.`);
+    }
+
+    resolvedValues[key] = parameterValue;
+  }
+
+  return resolvedValues;
+};
+
+const loadAppConfigUncached = async (): Promise<AppConfig> => {
+  const awsRegion = process.env.AWS_REGION?.trim() || 'us-east-1';
+  const githubConfigValues = await loadResolvedGitHubConfigValues(awsRegion);
+
+  return validateGitHubAuthConfig({
+    awsRegion,
+    githubWebhookSecret: getRequiredGitHubConfigValue(
+      githubConfigValues.githubWebhookSecret,
+      githubSsmBindings.githubWebhookSecret.directEnvName,
+      githubSsmBindings.githubWebhookSecret.parameterEnvName,
+    ),
+    githubToken: githubConfigValues.githubToken,
+    githubAppId: githubConfigValues.githubAppId,
+    githubAppPrivateKey: githubConfigValues.githubAppPrivateKey,
+    githubAppInstallationId: parseOptionalPositiveIntegerValue(
+      'GITHUB_APP_INSTALLATION_ID',
+      githubConfigValues.githubAppInstallationId,
+    ),
     evaluationsTableName: getRequiredEnv('EVALUATIONS_TABLE_NAME'),
     rawEventBucketName: getOptionalEnv('RAW_EVENT_BUCKET_NAME'),
     enableRawEventArchive: parseBoolean(process.env.ENABLE_RAW_EVENT_ARCHIVE),
     requiredLabels: parseCsv(process.env.REQUIRED_LABELS),
     evaluationRepository: parseEvaluationRepository(process.env.EVALUATION_REPOSITORY),
   });
+};
+
+export const loadAppConfig = (): Promise<AppConfig> => {
+  if (!appConfigPromise) {
+    appConfigPromise = loadAppConfigUncached().catch((error) => {
+      appConfigPromise = undefined;
+      throw error;
+    });
+  }
+
+  return appConfigPromise;
+};
+
+export const setSsmParameterLoaderForTests = (
+  loader: SsmParameterLoader,
+): void => {
+  ssmParameterLoader = loader;
+  appConfigPromise = undefined;
+};
+
+export const resetAppConfigCacheForTests = (): void => {
+  appConfigPromise = undefined;
+  ssmParameterLoader = defaultSsmParameterLoader;
+  ssmClients.clear();
+};

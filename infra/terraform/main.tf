@@ -4,6 +4,10 @@ locals {
   api_name         = coalesce(var.api_name, "${var.service_name}-http-api")
   alarm_topic_name = coalesce(var.alarm_topic_name, "${var.service_name}-alarms")
   artifact_path    = coalesce(var.artifact_path, "${path.root}/../../.artifacts/${local.function_name}.zip")
+  github_ssm_parameter_path_prefix = coalesce(
+    var.github_ssm_parameter_path_prefix,
+    "/${var.service_name}/${var.environment}/github",
+  )
 
   common_tags = merge(
     {
@@ -36,28 +40,29 @@ module "data" {
 module "service" {
   source = "./modules/service"
 
-  function_name              = local.function_name
-  role_name                  = local.lambda_role_name
-  artifact_path              = local.artifact_path
-  handler                    = var.aws_lambda_handler
-  runtime                    = var.aws_lambda_runtime
-  memory_size                = var.aws_lambda_memory_size
-  timeout                    = var.aws_lambda_timeout
-  architectures              = var.lambda_architectures
-  log_retention_in_days      = var.lambda_log_retention_in_days
-  github_webhook_secret      = var.github_webhook_secret
-  github_token               = var.github_token
-  github_app_id              = var.github_app_id
-  github_app_private_key     = var.github_app_private_key
-  github_app_installation_id = var.github_app_installation_id
-  evaluations_table_name     = module.data.evaluations_table_name
-  evaluations_table_arn      = module.data.evaluations_table_arn
-  raw_event_bucket_name      = module.data.raw_event_bucket_name
-  raw_event_bucket_arn       = module.data.raw_event_bucket_arn
-  enable_raw_event_archive   = var.enable_raw_event_archive
-  required_labels            = var.required_labels
-  evaluation_repository      = var.evaluation_repository
-  tags                       = local.common_tags
+  function_name                    = local.function_name
+  role_name                        = local.lambda_role_name
+  artifact_path                    = local.artifact_path
+  handler                          = var.aws_lambda_handler
+  runtime                          = var.aws_lambda_runtime
+  memory_size                      = var.aws_lambda_memory_size
+  timeout                          = var.aws_lambda_timeout
+  architectures                    = var.lambda_architectures
+  log_retention_in_days            = var.lambda_log_retention_in_days
+  github_webhook_secret            = var.github_webhook_secret
+  github_token                     = var.github_token
+  github_app_id                    = var.github_app_id
+  github_app_private_key           = var.github_app_private_key
+  github_app_installation_id       = var.github_app_installation_id
+  github_ssm_parameter_path_prefix = local.github_ssm_parameter_path_prefix
+  evaluations_table_name           = module.data.evaluations_table_name
+  evaluations_table_arn            = module.data.evaluations_table_arn
+  raw_event_bucket_name            = module.data.raw_event_bucket_name
+  raw_event_bucket_arn             = module.data.raw_event_bucket_arn
+  enable_raw_event_archive         = var.enable_raw_event_archive
+  required_labels                  = var.required_labels
+  evaluation_repository            = var.evaluation_repository
+  tags                             = local.common_tags
 }
 
 module "http_api" {
