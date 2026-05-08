@@ -59,50 +59,50 @@ const buildRequiredLabelsCheck = (
       };
 };
 
-  const buildCvsPhraseCheck = (
-    pullRequestTitle: string,
-    pullRequestBody: string | null | undefined,
-  ): EvaluationCheck => {
-    const combinedText = `${pullRequestTitle}\n${pullRequestBody ?? ''}`.toLowerCase();
+const buildCvsPhraseCheck = (
+  pullRequestTitle: string,
+  pullRequestBody: string | null | undefined,
+): EvaluationCheck => {
+  const combinedText = `${pullRequestTitle}\n${pullRequestBody ?? ''}`.toLowerCase();
 
-    if (combinedText.includes('cvs is not rock')) {
-      return {
-        name: 'cvs phrase',
-        status: 'fail',
-        details:
-          'PR text says "CVS is not Rock". Remove the opposite phrase or replace it with "CVS is Rock".',
-      };
-    }
-
-    if (combinedText.includes('cvs is rock')) {
-      return {
-        name: 'cvs phrase',
-        status: 'pass',
-        details: 'PR text includes "CVS is Rock".',
-      };
-    }
-
+  if (combinedText.includes('cvs is not rock')) {
     return {
       name: 'cvs phrase',
-      status: 'skip',
-      details: 'PR text does not mention either CVS phrase.',
+      status: 'fail',
+      details:
+        'PR text says "CVS is not Rock". Remove the opposite phrase or replace it with "CVS is Rock".',
     };
+  }
+
+  if (combinedText.includes('cvs is rock')) {
+    return {
+      name: 'cvs phrase',
+      status: 'pass',
+      details: 'PR text includes "CVS is Rock".',
+    };
+  }
+
+  return {
+    name: 'cvs phrase',
+    status: 'skip',
+    details: 'PR text does not mention either CVS phrase.',
   };
+};
 
 const determineNextStep = (checks: EvaluationCheck[], riskLevel: RiskLevel): string => {
   const blockingCheck = checks.find((check) => check.status === 'fail');
 
   if (blockingCheck) {
-      switch (blockingCheck.name) {
-        case 'branch naming':
-          return 'rename the branch to match the platform convention';
-        case 'required labels':
-          return 'add the required labels before merge';
-        case 'cvs phrase':
-          return 'update the PR title or description to remove "CVS is not Rock"';
-        default:
-          return 'resolve the failing checks before merge';
-      }
+    switch (blockingCheck.name) {
+      case 'branch naming':
+        return 'rename the branch to match the platform convention';
+      case 'required labels':
+        return 'add the required labels before merge';
+      case 'cvs phrase':
+        return 'update the PR title or description to remove "CVS is not Rock"';
+      default:
+        return 'resolve the failing checks before merge';
+    }
   }
 
   if (riskLevel === 'high') {
