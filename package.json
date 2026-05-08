@@ -15,7 +15,7 @@
     "dev": "node --watch src/index.ts",
     "start": "node dist/index.js",
     "slides:dev": "slidev diagrams/pr-concierge-architecture.slidev.md",
-    "slides:build": "slidev build diagrams/pr-concierge-architecture.slidev.md --out ../.artifacts/slidev/pr-concierge-architecture"
+    "slides:build": "slidev build diagrams/pr-concierge-architecture.slidev.md --out .artifacts/slidev/pr-concierge-architecture"
   },
   "keywords": [
     "aws-lambda",
