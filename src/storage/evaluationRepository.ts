@@ -40,7 +40,11 @@ export class ConsoleEvaluationRepository implements EvaluationRepository {
       repositoryFullName: record.repository_full_name,
       action: record.action,
       riskLevel: record.risk_level,
-      evaluationRecord: record,
+      changedFileCount: record.changed_files.length,
+      recordKey: {
+        pk: record.pk,
+        sk: record.sk,
+      },
     });
   }
 }

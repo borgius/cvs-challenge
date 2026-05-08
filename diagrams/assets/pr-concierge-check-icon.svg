@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">PR Concierge check icon</title>
+  <desc id="desc">A dark rounded-square app icon with a pull-request branch, a check mark, and a small concierge-style sparkle.</desc>
+  <defs>
+    <linearGradient id="bg" x1="56" y1="40" x2="456" y2="472" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#111827" />
+      <stop offset="0.55" stop-color="#0f172a" />
+      <stop offset="1" stop-color="#1d4ed8" />
+    </linearGradient>
+    <linearGradient id="branch" x1="136" y1="352" x2="384" y2="136" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#22d3ee" />
+      <stop offset="1" stop-color="#a78bfa" />
+    </linearGradient>
+    <linearGradient id="badge" x1="294" y1="102" x2="412" y2="218" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#22d3ee" />
+      <stop offset="1" stop-color="#8b5cf6" />
+    </linearGradient>
+    <radialGradient id="glow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(388 118) rotate(135) scale(176)">
+      <stop offset="0" stop-color="#67e8f9" stop-opacity="0.72" />
+      <stop offset="1" stop-color="#67e8f9" stop-opacity="0" />
+    </radialGradient>
+    <filter id="softGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="10" result="blur" />
+      <feMerge>
+        <feMergeNode in="blur" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+  </defs>
+
+  <rect x="24" y="24" width="464" height="464" rx="112" fill="url(#bg)" />
+  <rect x="24" y="24" width="464" height="464" rx="112" fill="none" stroke="rgba(255,255,255,0.12)" stroke-width="2" />
+  <circle cx="388" cy="118" r="168" fill="url(#glow)" />
+
+  <g filter="url(#softGlow)">
+    <path
+      d="M164 356V188c0-26 22-48 48-48h118"
+      fill="none"
+      stroke="url(#branch)"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      stroke-width="28"
+    />
+  </g>
+
+  <circle cx="164" cy="356" r="38" fill="#0f172a" stroke="#67e8f9" stroke-width="18" />
+  <circle cx="164" cy="140" r="30" fill="#0f172a" stroke="#67e8f9" stroke-width="14" />
+
+  <g filter="url(#softGlow)">
+    <circle cx="360" cy="140" r="76" fill="url(#badge)" />
+  </g>
+  <circle cx="360" cy="140" r="68" fill="#10203d" fill-opacity="0.2" />
+  <path
+    d="M324 140l24 24 48-56"
+    fill="none"
+    stroke="#f8fafc"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    stroke-width="20"
+  />
+
+  <path
+    d="M408 78l8 18 18 8-18 8-8 18-8-18-18-8 18-8 8-18z"
+    fill="#f8fafc"
+    fill-opacity="0.92"
+  />
+
+  <path
+    d="M120 412c28 16 60 24 96 24 64 0 118-22 164-66"
+    fill="none"
+    stroke="rgba(255,255,255,0.18)"
+    stroke-linecap="round"
+    stroke-width="10"
+  />
+</svg>
