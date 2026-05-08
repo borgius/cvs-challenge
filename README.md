@@ -25,7 +25,7 @@ Rendered PDF, PNG, and PPTX exports are intentionally not wired by default so br
 - branch naming and optional required-label checks
 - a GitHub-visible `pr-concierge` check run for supported pull request events
 - a deterministic CVS phrase rule: pass on `CVS is Rock`, fail on `CVS is not Rock`, and ignore the phrase when it is absent
-- encrypted SSM Parameter Store runtime indirection for GitHub webhook and auth inputs
+- encrypted SSM Parameter Store runtime indirection for GitHub webhook and auth inputs, with deployment scripts updating secret values outside OpenTofu state
 - structured JSON logging
 - DynamoDB-backed evaluation persistence for deployed environments, with console logging available for local development
 - OpenTofu root configuration and local wrapper modules for Lambda, HTTP API, DynamoDB, optional S3, SNS, and CloudWatch alarms
@@ -86,15 +86,15 @@ If the URL overrides and deployment summary are both missing, the deployed suite
 
 ## Environment variables
 
-Keep `.env` for local runtime values and the deployment secrets that OpenTofu stores in encrypted SSM parameters for the deployed Lambda runtime. Put ordinary OpenTofu root variables in `infra/terraform/env/<env>.auto.tfvars` instead.
+Keep `.env` for local runtime values and the deployment secrets that `scripts/deploy.sh` writes to encrypted SSM parameters for the deployed Lambda runtime. Put ordinary OpenTofu root variables in `infra/terraform/env/<env>.auto.tfvars` instead.
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
-| `GITHUB_WEBHOOK_SECRET` | Yes for local direct-env runtime and deploys | Validates the `x-hub-signature-256` header from GitHub for local runs, feeds `TF_VAR_github_webhook_secret` during deploy and destroy if you do not export it directly, populates the deployed webhook secret SSM parameter, and is reused by `scripts/configure-self-webhook.sh` when you explicitly configure this repository's managed webhook |
-| `GITHUB_APP_ID` | Yes for local direct-env GitHub App auth and deploys | GitHub App ID used to mint installation tokens for GitHub check publication in local direct-env runs, and fed into `TF_VAR_github_app_id` during deploy so OpenTofu can store the deployed runtime value in encrypted SSM Parameter Store |
-| `GITHUB_APP_PRIVATE_KEY` | Yes for local direct-env GitHub App auth and deploys | GitHub App private key used to mint installation tokens for local direct-env runs, and fed into `TF_VAR_github_app_private_key` during deploy so OpenTofu can store the deployed runtime value in encrypted SSM Parameter Store |
+| `GITHUB_WEBHOOK_SECRET` | Yes for local direct-env runtime and deploys | Validates the `x-hub-signature-256` header from GitHub for local runs, is written by `scripts/deploy.sh` to the deployed webhook secret SSM parameter, and is reused by `scripts/configure-self-webhook.sh` when you explicitly configure this repository's managed webhook |
+| `GITHUB_APP_ID` | Yes for local direct-env GitHub App auth and deploys | GitHub App ID used to mint installation tokens for GitHub check publication in local direct-env runs, and written by `scripts/deploy.sh` to encrypted SSM Parameter Store for deployed runtime reads |
+| `GITHUB_APP_PRIVATE_KEY` | Yes for local direct-env GitHub App auth and deploys | GitHub App private key used to mint installation tokens for local direct-env runs, and written by `scripts/deploy.sh` to encrypted SSM Parameter Store for deployed runtime reads |
 | `GITHUB_APP_INSTALLATION_ID` | No | Optional GitHub App installation ID for local direct-env runs or deploys. Leave it blank to let the app resolve the repository installation automatically |
-| `GITHUB_TOKEN` | No | Optional fallback token for changed-file lookups. If it is absent, PR Concierge reuses the GitHub App installation token for file reads as well. When set during deploy, OpenTofu stores it in encrypted SSM Parameter Store for the deployed runtime |
+| `GITHUB_TOKEN` | No | Optional fallback token for changed-file lookups. If it is absent, PR Concierge reuses the GitHub App installation token for file reads as well. When set during deploy, `scripts/deploy.sh` writes it to encrypted SSM Parameter Store for deployed runtime reads |
 | `GITHUB_WEBHOOK_SECRET_SSM_PARAMETER_NAME` | No | Optional runtime override. When `GITHUB_WEBHOOK_SECRET` is blank and this parameter name is set, the app reads the webhook secret from encrypted SSM Parameter Store at request time |
 | `GITHUB_APP_ID_SSM_PARAMETER_NAME` | No | Optional runtime override for `GITHUB_APP_ID` |
 | `GITHUB_APP_PRIVATE_KEY_SSM_PARAMETER_NAME` | No | Optional runtime override for `GITHUB_APP_PRIVATE_KEY` |
@@ -107,7 +107,7 @@ Keep `.env` for local runtime values and the deployment secrets that OpenTofu st
 | `REQUIRED_LABELS` | No | Comma-separated labels to enforce, such as `safe-to-deploy,needs-platform-review` |
 | `EVALUATION_REPOSITORY` | No | `console` for local logging or `dynamodb` for deployed persistence |
 
-For deployed Lambda runs, OpenTofu now writes the GitHub runtime values to encrypted SSM parameters and injects only the parameter names into the function environment. The runtime resolves the values from SSM on first use in each warm container and then caches them in memory.
+For deployed Lambda runs, `scripts/deploy.sh` writes the GitHub runtime values to encrypted SSM parameters with `aws ssm put-parameter`, and OpenTofu injects only the parameter names into the function environment. This keeps the raw GitHub secret values out of OpenTofu-managed resources and state. The runtime resolves the values from SSM on first use in each warm container and then caches them in memory.
 
 ## GitHub check publication
 
@@ -182,8 +182,8 @@ Prerequisites:
 - either existing backend resources or the ability to run `scripts/bootstrap-tofu-backend.sh` once first
 - a local `infra/terraform/env/<env>.auto.tfvars` file for non-secret root inputs
 - a local `infra/terraform/backend/<env>.s3.tfbackend` file for backend coordinates
-- `.env` values for `GITHUB_WEBHOOK_SECRET`, `GITHUB_APP_ID`, and `GITHUB_APP_PRIVATE_KEY`, or direct `TF_VAR_github_webhook_secret`, `TF_VAR_github_app_id`, and `TF_VAR_github_app_private_key` exports so OpenTofu can refresh the encrypted SSM parameters used by the deployed runtime
-- optional `.env` values for `GITHUB_APP_INSTALLATION_ID` and `GITHUB_TOKEN`, or direct `TF_VAR_github_app_installation_id` and `TF_VAR_github_token` exports
+- `.env` values for `GITHUB_WEBHOOK_SECRET`, `GITHUB_APP_ID`, and `GITHUB_APP_PRIVATE_KEY`, or direct `TF_VAR_github_webhook_secret`, `TF_VAR_github_app_id`, and `TF_VAR_github_app_private_key` exports so `scripts/deploy.sh` can refresh the encrypted SSM parameters used by the deployed runtime
+- optional `.env` values for `GITHUB_APP_INSTALLATION_ID` and `GITHUB_TOKEN`, or direct `TF_VAR_github_app_installation_id` and `TF_VAR_github_token` exports for the same deploy-time SSM refresh path
 - `jq`
 - `zip`
 - `npm`
@@ -192,7 +192,7 @@ Scripts:
 
 - `scripts/bootstrap-tofu-backend.sh` — creates or imports the S3 bucket and DynamoDB lock table used by the OpenTofu backend
 - `scripts/package-lambda.sh` — builds the app and creates a Lambda zip in `.artifacts/`
-- `scripts/deploy.sh` — packages the app, reads the local `*.auto.tfvars` and `*.s3.tfbackend` files, imports pre-existing Lambda-side resources into OpenTofu state when needed, runs `tofu init`, runs `tofu apply`, and writes `.artifacts/<service>-deployment.json`
+- `scripts/deploy.sh` — packages the app, reads the local `*.auto.tfvars` and `*.s3.tfbackend` files, refreshes GitHub runtime values in encrypted SSM Parameter Store outside OpenTofu state, imports pre-existing Lambda-side resources into OpenTofu state when needed, runs `tofu init`, runs `tofu apply`, and writes `.artifacts/<service>-deployment.json`
 - `scripts/configure-self-webhook.sh` — explicitly creates or updates this repository's managed `pull_request` webhook from `.artifacts/<service>-deployment.json` and writes `.artifacts/<service>-github-webhook.json`
 - `scripts/smoke-test.sh` — calls the deployed `GET /health` endpoint
 - `scripts/destroy.sh` — reads the same local `*.auto.tfvars` and `*.s3.tfbackend` files, then runs targeted `tofu destroy` by default to preserve DynamoDB and S3 data; set `DELETE_DATA=true` for a full stack destroy
@@ -288,7 +288,7 @@ Notes:
 - The root OpenTofu module emits a `deployment_summary` output, and `scripts/deploy.sh` persists it to `.artifacts/<service>-deployment.json` for operators and follow-on scripts.
 - If `GITHUB_WEBHOOK_SECRET`, `GITHUB_APP_ID`, or `GITHUB_APP_PRIVATE_KEY` still use placeholder values, deployment will stop early because the deployed runtime cannot publish GitHub checks without GitHub App auth.
 - `allowed_account_ids` is available as an optional provider safety rail if you want the root module to refuse the wrong AWS account.
-- GitHub runtime values now land in encrypted SSM Parameter Store for Lambda reads, but they still exist in OpenTofu state because OpenTofu manages the `SecureString` parameter values. `sensitive = true` redacts CLI output, but it does not remove the raw values from state. Protect the state bucket and lock table accordingly. Moving parameter creation outside OpenTofu is the next hardening step.
+- GitHub runtime values now land in encrypted SSM Parameter Store for Lambda reads without being managed as OpenTofu `aws_ssm_parameter` resources. Protect the backend bucket and lock table because historical state may still contain older secret-managed revisions until you migrate or purge them.
 
 ## Project layout
 
@@ -313,7 +313,7 @@ This scaffold keeps the MVP foundation small and honest:
 
 That keeps the repo ready for the next implementation pass without overselling unfinished infrastructure. A little less smoke, a little more signal.
 
-
+nd 
 ### test check
 
 CVS is Rock

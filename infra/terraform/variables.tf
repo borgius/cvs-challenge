@@ -114,40 +114,70 @@ variable "api_integration_timeout_milliseconds" {
 }
 
 variable "github_webhook_secret" {
-  description = "GitHub webhook secret stored in encrypted SSM Parameter Store for Lambda runtime resolution."
+  description = "Deprecated compatibility input. Deployment scripts read this from .env or TF_VAR_... and write SSM directly; Terraform no longer stores this value in state."
   type        = string
   default     = null
   sensitive   = true
 }
 
 variable "github_token" {
-  description = "Optional GitHub token stored in encrypted SSM Parameter Store as a changed-file lookup fallback."
+  description = "Deprecated compatibility input. Deployment scripts read this optional fallback from .env or TF_VAR_... and write SSM directly; Terraform no longer stores this value in state."
   type        = string
   default     = null
   sensitive   = true
 }
 
 variable "github_app_id" {
-  description = "GitHub App ID stored in encrypted SSM Parameter Store for check-run authentication."
+  description = "Deprecated compatibility input. Deployment scripts read this from .env or TF_VAR_... and write SSM directly; Terraform no longer stores this value in state."
   type        = string
   default     = null
 }
 
 variable "github_app_private_key" {
-  description = "GitHub App private key stored in encrypted SSM Parameter Store for installation token minting."
+  description = "Deprecated compatibility input. Deployment scripts read this from .env or TF_VAR_... and write SSM directly; Terraform no longer stores this value in state."
   type        = string
   default     = null
   sensitive   = true
 }
 
 variable "github_app_installation_id" {
-  description = "Optional GitHub App installation ID stored in encrypted SSM Parameter Store to skip repository installation lookup."
+  description = "Deprecated compatibility input. Deployment scripts read this optional installation ID from .env or TF_VAR_... and write SSM directly; Terraform no longer stores this value in state."
   type        = string
   default     = null
 }
 
 variable "github_ssm_parameter_path_prefix" {
   description = "Optional SSM Parameter Store path prefix used for GitHub runtime inputs. Defaults to /<service>/<environment>/github."
+  type        = string
+  default     = null
+}
+
+variable "github_webhook_secret_ssm_parameter_name" {
+  description = "SSM Parameter Store name containing the GitHub webhook secret. Defaults under github_ssm_parameter_path_prefix."
+  type        = string
+  default     = null
+}
+
+variable "github_token_ssm_parameter_name" {
+  description = "Optional SSM Parameter Store name containing the GitHub token fallback for changed-file lookups."
+  type        = string
+  default     = null
+}
+
+variable "github_app_id_ssm_parameter_name" {
+  description = "SSM Parameter Store name containing the GitHub App ID. Defaults under github_ssm_parameter_path_prefix."
+  type        = string
+  default     = null
+}
+
+variable "github_app_private_key_ssm_parameter_name" {
+  description = "SSM Parameter Store name containing the GitHub App private key. Defaults under github_ssm_parameter_path_prefix."
+  type        = string
+  default     = null
+}
+
+variable "github_app_installation_id_ssm_parameter_name" {
+  description = "Optional SSM Parameter Store name containing the GitHub App installation ID override."
   type        = string
   default     = null
 }

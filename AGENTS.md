@@ -59,13 +59,13 @@ Local development is most reliable on the same major Node version used in CI. Th
 
 Use `.env.example` as the canonical template. `.env` is gitignored.
 
-Keep `.env` focused on local runtime values and the deployment secrets that OpenTofu stores in encrypted SSM parameters for the deployed Lambda runtime:
+Keep `.env` focused on local runtime values and the deployment secrets that `scripts/deploy.sh` writes to encrypted SSM parameters for the deployed Lambda runtime:
 
-- `GITHUB_WEBHOOK_SECRET` — required for local direct-env signature validation, reused by `scripts/configure-self-webhook.sh`, and used by OpenTofu to refresh the deployed webhook secret SSM parameter
-- `GITHUB_APP_ID` — required for local direct-env GitHub App auth and used by OpenTofu to refresh the deployed GitHub App ID SSM parameter
-- `GITHUB_APP_PRIVATE_KEY` — required for local direct-env GitHub App auth and used by OpenTofu to refresh the deployed GitHub App private key SSM parameter; use the PEM value directly or store it on one line with escaped newlines in `.env`
+- `GITHUB_WEBHOOK_SECRET` — required for local direct-env signature validation, reused by `scripts/configure-self-webhook.sh`, and used by `scripts/deploy.sh` to refresh the deployed webhook secret SSM parameter
+- `GITHUB_APP_ID` — required for local direct-env GitHub App auth and used by `scripts/deploy.sh` to refresh the deployed GitHub App ID SSM parameter
+- `GITHUB_APP_PRIVATE_KEY` — required for local direct-env GitHub App auth and used by `scripts/deploy.sh` to refresh the deployed GitHub App private key SSM parameter; use the PEM value directly or store it on one line with escaped newlines in `.env`
 - `GITHUB_APP_INSTALLATION_ID` — optional explicit installation ID for local direct-env auth and deploys
-- `GITHUB_TOKEN` — optional fallback for changed-file lookups; do not reuse it as the repository-admin token for webhook management
+- `GITHUB_TOKEN` — optional fallback for changed-file lookups; when present, `scripts/deploy.sh` refreshes the deployed fallback-token SSM parameter. Do not reuse it as the repository-admin token for webhook management
 - `GITHUB_WEBHOOK_SECRET_SSM_PARAMETER_NAME` — optional runtime override used when you want the app to read the webhook secret from SSM instead of direct env
 - `GITHUB_APP_ID_SSM_PARAMETER_NAME` — optional runtime override for `GITHUB_APP_ID`
 - `GITHUB_APP_PRIVATE_KEY_SSM_PARAMETER_NAME` — optional runtime override for `GITHUB_APP_PRIVATE_KEY`
@@ -164,7 +164,7 @@ Before finishing a change, run the relevant app checks plus any targeted tests y
 
 The root uses an S3 backend configured at init time, with DynamoDB used for state locking. The steady-state deploy and destroy scripts read backend coordinates from `infra/terraform/backend/<env>.s3.tfbackend` and non-secret root variables from `infra/terraform/env/<env>.auto.tfvars`.
 
-The deploy and destroy scripts reserve `TF_VAR_...` for the remaining GitHub values that OpenTofu writes to encrypted SSM Parameter Store for the deployed runtime. AWS credentials stay on the AWS credential chain rather than in repo-local config files.
+The deploy script reads the remaining GitHub values from `.env` or legacy `TF_VAR_...` exports, writes them to encrypted SSM Parameter Store with AWS CLI, and passes only SSM parameter names into OpenTofu. AWS credentials stay on the AWS credential chain rather than in repo-local config files.
 
 `scripts/deploy.sh` imports the Lambda function, IAM role, and Lambda log group into OpenTofu state when those resources already exist from an earlier manual or partially managed deployment.
 
@@ -192,7 +192,7 @@ The workflow deploy path intentionally still runs through `scripts/bootstrap-tof
 - Keep secrets in `.env` locally and in secret managers or CI configuration remotely.
 - Keep GitHub repository-admin auth for webhook management separate from the Lambda runtime GitHub App credentials and any optional `GITHUB_TOKEN` fallback. Use GitHub CLI auth or a dedicated `GH_TOKEN` when running `scripts/configure-self-webhook.sh`.
 - Keep AWS provider and backend credentials out of `.env`, `*.auto.tfvars`, and `*.s3.tfbackend` files. Use the AWS credential chain instead.
-- Remember that the GitHub runtime values still land in OpenTofu state today because OpenTofu manages the encrypted SSM parameter values. Protect the backend bucket and lock table accordingly.
+- Remember that historical OpenTofu state revisions may still contain GitHub runtime values from older deployments that managed encrypted SSM parameter values directly. Protect the backend bucket and lock table accordingly, and rotate credentials after migrating older environments.
 - If you add AWS integrations, document the required IAM permissions and environment variables.
 - Prefer least-privilege changes in Terraform and keep security-sensitive behavior explicit and reviewable.
 

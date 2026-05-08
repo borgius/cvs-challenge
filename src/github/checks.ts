@@ -1,4 +1,5 @@
 import type { CheckStatus, EvaluationCheck, EvaluationResult } from '../types/evaluation.ts';
+import { buildGitHubRepositoryApiUrl } from './repository.ts';
 
 const githubApiVersion = '2022-11-28';
 const checkRunName = 'pr-concierge';
@@ -45,20 +46,6 @@ interface GitHubCheckStatusCounts {
   skip: number;
 }
 
-const parseRepositoryFullName = (
-  repositoryFullName: string,
-): { owner: string; repo: string } => {
-  const [owner, repo] = repositoryFullName.split('/');
-
-  if (!owner || !repo) {
-    throw new Error(
-      `Repository name must be in owner/repo format: ${repositoryFullName}`,
-    );
-  }
-
-  return { owner, repo };
-};
-
 const buildGitHubHeaders = (githubToken: string): Record<string, string> => ({
   accept: 'application/vnd.github+json',
   authorization: `Bearer ${githubToken}`,
@@ -79,8 +66,7 @@ const requestGitHubCheckRun = async <T>(
   method: 'POST' | 'PATCH',
   body: Record<string, unknown>,
 ): Promise<T> => {
-  const { owner, repo } = parseRepositoryFullName(repositoryFullName);
-  const response = await fetch(`https://api.github.com/repos/${owner}/${repo}${path}`, {
+  const response = await fetch(buildGitHubRepositoryApiUrl(repositoryFullName, path), {
     method,
     headers: buildGitHubHeaders(githubToken),
     body: JSON.stringify(body),

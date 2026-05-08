@@ -22,7 +22,7 @@ Use four distinct input lanes with this root:
 - `env/<env>.auto.tfvars` — non-secret root variables such as naming, region, runtime tuning, data-protection flags, alarm settings, and the optional `allowed_account_ids` safety rail
 - `backend/<env>.s3.tfbackend` — backend coordinates only, such as `bucket`, `key`, `region`, `encrypt`, and `dynamodb_table`
 - the standard AWS credential chain — AWS profile, AWS SSO, assume-role, or OIDC/web identity for both the provider and the S3 backend
-- `TF_VAR_github_webhook_secret`, `TF_VAR_github_app_id`, `TF_VAR_github_app_private_key`, the optional `TF_VAR_github_app_installation_id`, and the optional `TF_VAR_github_token` fallback — the remaining application inputs that still flow into managed resources so OpenTofu can refresh the encrypted SSM parameters used by the deployed Lambda runtime; `scripts/deploy.sh` and `scripts/destroy.sh` can populate these from `.env`
+- `GITHUB_WEBHOOK_SECRET`, `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, the optional `GITHUB_APP_INSTALLATION_ID`, and the optional `GITHUB_TOKEN` fallback — deployment-time values read by `scripts/deploy.sh` from `.env` or matching legacy `TF_VAR_...` exports so the script can refresh encrypted SSM parameters outside OpenTofu state. OpenTofu receives only SSM parameter names.
 
 Keep AWS credentials out of `.env`, `*.auto.tfvars`, and `*.s3.tfbackend` files.
 
@@ -31,7 +31,7 @@ Keep AWS credentials out of `.env`, `*.auto.tfvars`, and `*.s3.tfbackend` files.
 - Lambda function for the Hono application
 - API Gateway HTTP API with `GET /health` and `POST /webhooks/github`
 - DynamoDB table for evaluation records
-- encrypted SSM parameters for GitHub webhook and runtime auth inputs
+- Lambda environment variables and IAM grants for encrypted SSM parameters that hold GitHub webhook and runtime auth inputs
 - optional S3 bucket for raw webhook archive storage
 - SNS topic for alarm delivery
 - CloudWatch alarms for Lambda `Errors` and HTTP API `5xx`
@@ -49,7 +49,7 @@ The GitHub Actions deploy-readiness workflow runs the same validation steps, but
 ## Operational notes
 
 - The root uses a partial S3 backend. `scripts/deploy.sh` and `scripts/destroy.sh` read a local `backend/<env>.s3.tfbackend` file and pass it to `tofu init`.
-- The same scripts read a local `env/<env>.auto.tfvars` file for non-secret root variables and reserve `TF_VAR_...` for the remaining GitHub secrets.
+- The same scripts read a local `env/<env>.auto.tfvars` file for non-secret root variables. `scripts/deploy.sh` reads GitHub runtime values separately and writes them to SSM before `tofu apply`.
 - `scripts/deploy.sh` now fails early unless GitHub App credentials are present because the deployed runtime publishes GitHub check runs. `scripts/destroy.sh` can still proceed without those values because the root variables default to `null` when they are omitted.
 - By default the deploy and destroy scripts use the `dev` files. Set `TOFU_ENVIRONMENT=<name>` to switch to another `<name>.auto.tfvars` and `<name>.s3.tfbackend` pair, or set `TOFU_VAR_FILE` and `TOFU_BACKEND_FILE` directly.
 - The remote state bucket and DynamoDB lock table must exist before the first apply. `scripts/bootstrap-tofu-backend.sh` can create them through the separate local-state root in `infra/bootstrap/tofu-backend/`.
@@ -57,4 +57,4 @@ The GitHub Actions deploy-readiness workflow runs the same validation steps, but
 - `scripts/configure-self-webhook.sh` is a separate, explicit repository-mutation step. It reads `.artifacts/<service>-deployment.json` to find the deployed `webhookUrl`, then creates or updates the managed repository webhook under a separate GitHub admin-auth lane.
 - Keep label bootstrap conditional. If you leave `required_labels` empty, basic self-hook setup stops at webhook wiring. If you later set `required_labels`, create the matching GitHub labels as a separate repository task.
 - `scripts/destroy.sh` preserves DynamoDB and S3 data by default through targeted destroy. Set `DELETE_DATA=true` for full stack removal.
-- The root now stores GitHub runtime values in encrypted SSM parameters and injects only parameter names into the Lambda environment. OpenTofu still accepts the raw inputs because it manages the `SecureString` parameter values, so the raw values still exist in state even though the Lambda environment no longer contains them.
+- The root injects only SSM parameter names into the Lambda environment and grants `ssm:GetParameter`/`ssm:GetParameters` on those exact parameter ARNs. GitHub runtime values are refreshed by `scripts/deploy.sh` with AWS CLI calls, not by OpenTofu-managed `aws_ssm_parameter` resources.

@@ -303,7 +303,32 @@ describe('local Lambda webhook integration', () => {
     });
   });
 
-  it('returns details when webhook processing fails after payload validation', async () => {
+  it('rejects oversized webhook bodies before signature validation', async () => {
+    applyLocalTestEnv();
+
+    const response = await handler(
+      buildHttpApiV2Event({
+        method: 'POST',
+        path: '/webhooks/github',
+        headers: {
+          'content-type': 'application/json',
+          'content-length': '1000001',
+        },
+        body: '{}',
+      }),
+      createLambdaContext('local-oversized-body-request-id'),
+    );
+    const body = parseJsonBody(response);
+
+    expect(response.statusCode).toBe(413);
+    expect(body).toMatchObject({
+      message: 'GitHub webhook request body is too large.',
+      details: 'Webhook request bodies must be 1000000 bytes or smaller.',
+      requestId: 'local-oversized-body-request-id',
+    });
+  });
+
+  it('does not return internal error details when webhook processing fails after payload validation', async () => {
     applyLocalTestEnv();
 
     const payload = buildSuccessfulWebhookPayload({
@@ -336,9 +361,11 @@ describe('local Lambda webhook integration', () => {
     expect(response.statusCode).toBe(500);
     expect(body).toMatchObject({
       message: 'Failed to process GitHub webhook.',
-      details: 'Synthetic GitHub API failure',
+      details:
+        'The webhook could not be processed. Use the requestId to inspect service logs.',
       requestId: 'local-processing-error-request-id',
     });
+    expect(JSON.stringify(body)).not.toContain('Synthetic GitHub API failure');
   });
 
   it('ignores unsupported pull request actions without calling GitHub', async () => {
