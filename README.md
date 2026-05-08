@@ -298,8 +298,3 @@ This scaffold keeps the MVP foundation small and honest:
 - The default deployed test pass in GitHub Actions stays conservative: health, empty-body rejection, and invalid-signature rejection are always checked, while the live signed-webhook success path remains opt-in.
 
 That keeps the repo ready for the next implementation pass without overselling unfinished infrastructure. A little less smoke, a little more signal.
-
-
-### test check
-
-CVS is Rock
