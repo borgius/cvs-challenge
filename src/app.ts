@@ -6,6 +6,10 @@ import { requestId, type RequestIdVariables } from 'hono/request-id';
 import { secureHeaders } from 'hono/secure-headers';
 
 import { loadAppConfig } from './config/env.ts';
+import {
+  getGitHubChecksWriteToken,
+  getGitHubRepositoryReadToken,
+} from './github/auth.ts';
 import { fetchPullRequestFiles } from './github/client.ts';
 import {
   buildCompletedGitHubCheckOutput,
@@ -191,21 +195,31 @@ app.post('/webhooks/github', async (c) => {
       githubDeliveryId,
     );
     let checkRunId: number | undefined;
+    let githubChecksToken: string | undefined;
 
     try {
+      githubChecksToken = await getGitHubChecksWriteToken(
+        config,
+        repositoryFullName,
+      );
+
       const createdCheckRun = await createGitHubCheckRun({
         repositoryFullName,
-        githubToken: config.githubToken,
+        githubToken: githubChecksToken,
         headSha,
         externalId: checkRunExternalId,
       });
 
       checkRunId = createdCheckRun.id;
+      const githubRepositoryReadToken = await getGitHubRepositoryReadToken(
+        config,
+        repositoryFullName,
+      );
 
       const changedFiles = (await fetchPullRequestFiles(
         repositoryFullName,
         pullNumber,
-        config.githubToken,
+        githubRepositoryReadToken,
       )).map((file) => file.filename);
       const evaluation = await evaluatePullRequest({
         action: payload.action,
@@ -227,7 +241,7 @@ app.post('/webhooks/github', async (c) => {
 
       await completeGitHubCheckRun({
         repositoryFullName,
-        githubToken: config.githubToken,
+        githubToken: githubChecksToken,
         checkRunId,
         conclusion: checkConclusion,
         output: buildCompletedGitHubCheckOutput(evaluation),
@@ -257,11 +271,11 @@ app.post('/webhooks/github', async (c) => {
         },
       });
     } catch (error) {
-      if (checkRunId !== undefined) {
+      if (checkRunId !== undefined && githubChecksToken !== undefined) {
         try {
           await completeGitHubCheckRun({
             repositoryFullName,
-            githubToken: config.githubToken,
+            githubToken: githubChecksToken,
             checkRunId,
             conclusion: 'failure',
             output: buildFailedGitHubCheckOutput(requestId),

@@ -92,11 +92,21 @@ require_file() {
   fi
 }
 
+is_placeholder_value() {
+  local value="${1:-}"
+
+  if [[ -z "$value" || "$value" == "replace-me" || "$value" == "replace-me-as-single-line-pem" ]]; then
+    return 0
+  fi
+
+  return 1
+}
+
 warn_if_placeholder() {
   local env_name="$1"
   local env_value="${!env_name:-}"
 
-  if [[ -z "$env_value" || "$env_value" == "replace-me" ]]; then
+  if is_placeholder_value "$env_value"; then
     warn "${env_name} is still using a placeholder value."
   fi
 }
@@ -180,20 +190,67 @@ export_tofu_root_secret_from_env() {
   local -r source_env_name="$1"
   local -r target_variable_name="$2"
   local -r target_env_name="TF_VAR_${target_variable_name}"
-  local -r source_value="${!source_env_name:-}"
-  local -r target_value="${!target_env_name:-}"
+  local resolved_value
 
-  if [[ -n "$target_value" ]]; then
-    export "${target_env_name}=${target_value}"
-    return
-  fi
+  resolved_value="$(resolve_tofu_root_input_value "$source_env_name" "$target_variable_name")"
 
-  if [[ -n "$source_value" ]]; then
-    export "${target_env_name}=${source_value}"
+  if [[ -n "$resolved_value" ]]; then
+    export "${target_env_name}=${resolved_value}"
     return
   fi
 
   error "Missing required deployment secret. Set ${source_env_name} in .env or export ${target_env_name}."
+}
+
+resolve_tofu_root_input_value() {
+  local -r source_env_name="$1"
+  local -r target_variable_name="$2"
+  local -r target_env_name="TF_VAR_${target_variable_name}"
+  local target_value="${!target_env_name:-}"
+  local source_value="${!source_env_name:-}"
+
+  if ! is_placeholder_value "$target_value"; then
+    printf '%s\n' "$target_value"
+    return
+  fi
+
+  if ! is_placeholder_value "$source_value"; then
+    printf '%s\n' "$source_value"
+    return
+  fi
+
+  printf '\n'
+}
+
+export_tofu_root_value_from_env_if_present() {
+  local -r source_env_name="$1"
+  local -r target_variable_name="$2"
+  local -r target_env_name="TF_VAR_${target_variable_name}"
+  local resolved_value
+
+  resolved_value="$(resolve_tofu_root_input_value "$source_env_name" "$target_variable_name")"
+
+  if [[ -n "$resolved_value" ]]; then
+    export "${target_env_name}=${resolved_value}"
+  fi
+}
+
+require_github_check_runtime_auth_inputs() {
+  local github_app_id
+  local github_app_private_key
+  local github_app_installation_id
+
+  github_app_id="$(resolve_tofu_root_input_value GITHUB_APP_ID github_app_id)"
+  github_app_private_key="$(resolve_tofu_root_input_value GITHUB_APP_PRIVATE_KEY github_app_private_key)"
+  github_app_installation_id="$(resolve_tofu_root_input_value GITHUB_APP_INSTALLATION_ID github_app_installation_id)"
+
+  if [[ -n "$github_app_installation_id" && ( -z "$github_app_id" || -z "$github_app_private_key" ) ]]; then
+    error "GITHUB_APP_INSTALLATION_ID requires GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY."
+  fi
+
+  if [[ -z "$github_app_id" || -z "$github_app_private_key" ]]; then
+    error "Missing GitHub App runtime auth. Set GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY in .env or export TF_VAR_github_app_id and TF_VAR_github_app_private_key before deployment."
+  fi
 }
 
 tofu_cmd_in_dir() {

@@ -27,7 +27,8 @@ jobs:
       - name: Validate required repository secrets
         env:
           AWS_DEPLOY_ROLE_ARN: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
-          PR_CONCIERGE_GITHUB_TOKEN: ${{ secrets.PR_CONCIERGE_GITHUB_TOKEN }}
+          PR_CONCIERGE_GITHUB_APP_ID: ${{ secrets.PR_CONCIERGE_GITHUB_APP_ID }}
+          PR_CONCIERGE_GITHUB_APP_PRIVATE_KEY: ${{ secrets.PR_CONCIERGE_GITHUB_APP_PRIVATE_KEY }}
           PR_CONCIERGE_WEBHOOK_SECRET: ${{ secrets.PR_CONCIERGE_WEBHOOK_SECRET }}
         run: |
           set -Eeuo pipefail
@@ -36,7 +37,8 @@ jobs:
 
           for secret_name in \
             AWS_DEPLOY_ROLE_ARN \
-            PR_CONCIERGE_GITHUB_TOKEN \
+            PR_CONCIERGE_GITHUB_APP_ID \
+            PR_CONCIERGE_GITHUB_APP_PRIVATE_KEY \
             PR_CONCIERGE_WEBHOOK_SECRET; do
             if [[ -z "${!secret_name:-}" ]]; then
               echo "::error::Missing required GitHub Actions repository secret: ${secret_name}"
@@ -145,13 +147,13 @@ jobs:
           printf 'TOFU_BACKEND_FILE=%s\n' "$tofu_backend_file" >> "$GITHUB_ENV"
 
       - name: Bootstrap OpenTofu backend
-        env:
-          GITHUB_TOKEN: ${{ secrets.PR_CONCIERGE_GITHUB_TOKEN }}
-          GITHUB_WEBHOOK_SECRET: ${{ secrets.PR_CONCIERGE_WEBHOOK_SECRET }}
         run: ./scripts/bootstrap-tofu-backend.sh
 
       - name: Deploy stack to AWS
         env:
+          GITHUB_APP_ID: ${{ secrets.PR_CONCIERGE_GITHUB_APP_ID }}
+          GITHUB_APP_PRIVATE_KEY: ${{ secrets.PR_CONCIERGE_GITHUB_APP_PRIVATE_KEY }}
+          GITHUB_APP_INSTALLATION_ID: ${{ secrets.PR_CONCIERGE_GITHUB_APP_INSTALLATION_ID }}
           GITHUB_TOKEN: ${{ secrets.PR_CONCIERGE_GITHUB_TOKEN }}
           GITHUB_WEBHOOK_SECRET: ${{ secrets.PR_CONCIERGE_WEBHOOK_SECRET }}
         run: ./scripts/deploy.sh
