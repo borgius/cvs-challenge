@@ -109,6 +109,7 @@ app.post('/webhooks/github', async (c) => {
       return c.json(
         {
           message: 'Invalid GitHub pull request payload.',
+          details: payloadValidationResult.errors,
           requestId,
         },
         400,

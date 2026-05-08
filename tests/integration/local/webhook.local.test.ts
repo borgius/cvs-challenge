@@ -21,13 +21,47 @@ interface RecordedGitHubRequest {
   jsonBody: Record<string, unknown> | undefined;
 }
 
-const loadWebhookFixture = (): PullRequestPayload =>
-  JSON.parse(
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const annotateGitHubUsersWithViewType = (value: unknown): void => {
+  if (Array.isArray(value)) {
+    value.forEach((item) => {
+      annotateGitHubUsersWithViewType(item);
+    });
+
+    return;
+  }
+
+  if (!isRecord(value)) {
+    return;
+  }
+
+  if (
+    typeof value.login === 'string' &&
+    typeof value.avatar_url === 'string' &&
+    typeof value.site_admin === 'boolean'
+  ) {
+    value.user_view_type = 'public';
+  }
+
+  Object.values(value).forEach((nestedValue) => {
+    annotateGitHubUsersWithViewType(nestedValue);
+  });
+};
+
+const loadWebhookFixture = (): PullRequestPayload => {
+  const payload = JSON.parse(
     readFileSync(
       new URL('../fixtures/github-pull-request-opened.official.json', import.meta.url),
       'utf8',
     ),
   ) as PullRequestPayload;
+
+  annotateGitHubUsersWithViewType(payload as unknown);
+
+  return payload;
+};
 
 const buildSuccessfulWebhookPayload = (
   contentOverrides: {
@@ -270,6 +304,47 @@ describe('local Lambda webhook integration', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('ignores review_requested payloads from GitHub\'s current user shape without calling GitHub', async () => {
+    applyLocalTestEnv();
+
+    const payload = loadWebhookFixture() as unknown as Record<string, unknown>;
+    const pullRequest = payload.pull_request as Record<string, unknown>;
+    const requestedReviewers = pullRequest.requested_reviewers as Record<string, unknown>[];
+
+    payload.action = 'review_requested';
+    payload.requested_reviewer = requestedReviewers[0];
+
+    const rawBody = JSON.stringify(payload);
+    const fetchMock = vi.fn();
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await handler(
+      buildHttpApiV2Event({
+        method: 'POST',
+        path: '/webhooks/github',
+        headers: {
+          'content-type': 'application/json',
+          'x-hub-signature-256': createGitHubSignature(
+            rawBody,
+            localTestEnvDefaults.GITHUB_WEBHOOK_SECRET,
+          ),
+        },
+        body: rawBody,
+      }),
+      createLambdaContext('local-review-requested-request-id'),
+    );
+    const body = parseJsonBody(response);
+
+    expect(response.statusCode).toBe(202);
+    expect(body).toMatchObject({
+      message: "Ignoring pull request action 'review_requested'.",
+      requestId: 'local-review-requested-request-id',
+      supportedActions: ['opened', 'synchronize', 'reopened'],
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('rejects webhook bodies that fail the official pull_request schema', async () => {
     applyLocalTestEnv();
 
@@ -303,7 +378,17 @@ describe('local Lambda webhook integration', () => {
     expect(body).toMatchObject({
       message: 'Invalid GitHub pull request payload.',
       requestId: 'local-invalid-payload-request-id',
+      details: expect.arrayContaining([
+        expect.objectContaining({
+          instancePath: '/',
+          keyword: 'required',
+          params: expect.objectContaining({
+            missingProperty: 'sender',
+          }),
+        }),
+      ]),
     });
+    expect(Array.isArray(body.details)).toBe(true);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
