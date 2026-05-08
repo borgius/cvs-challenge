@@ -13,7 +13,9 @@
     "test:integration:local": "vitest run --project local-lambda",
     "test:integration:deployed": "vitest run --project deployed",
     "dev": "node --watch src/index.ts",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "slides:dev": "slidev diagrams/pr-concierge-architecture.slidev.md",
+    "slides:build": "slidev build diagrams/pr-concierge-architecture.slidev.md --out .artifacts/slidev/pr-concierge-architecture"
   },
   "keywords": [
     "aws-lambda",
@@ -23,6 +25,8 @@
   ],
   "license": "ISC",
   "devDependencies": {
+    "@slidev/cli": "^52.15.1",
+    "@slidev/theme-default": "^0.25.0",
     "@types/aws-lambda": "^8.10.161",
     "@types/node": "^25.6.1",
     "typescript": "^6.0.3",
@@ -33,6 +37,10 @@
     "@aws-sdk/client-dynamodb": "^3.1045.0",
     "@aws-sdk/lib-dynamodb": "^3.1045.0",
     "@hono/node-server": "^2.0.1",
+    "@octokit/webhooks-schemas": "^7.6.1",
+    "@octokit/webhooks-types": "^7.6.1",
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1",
     "hono": "^4.12.18"
   }
 }

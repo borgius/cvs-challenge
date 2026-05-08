@@ -1,9 +1,18 @@
 # PR Concierge
 
 PR Concierge is a small internal platform service for pull request hygiene and release awareness.
-It accepts GitHub pull request webhooks, validates the signature, applies a few deterministic platform rules, scores PR risk from changed files, and produces a short summary that developers can act on.
+It accepts GitHub pull request webhooks, validates the signature, validates the webhook payload against GitHub's published schema, applies a few deterministic platform rules, scores PR risk from changed files, and produces a short summary that developers can act on.
 
 The HTTP layer now runs on [Hono](https://hono.dev/) so the project uses Hono routing, JSON helpers, AWS Lambda integration, and built-in middleware instead of custom response and handler modules.
+
+## Review artifacts
+
+- [`DECISIONS.md`](DECISIONS.md) — short design rationale for choosing API Gateway plus Lambda for the MVP and the alternatives considered
+- [`diagrams/pr-concierge-architecture.slidev.md`](diagrams/pr-concierge-architecture.slidev.md) — reviewer-facing Slidev deck with the committed Mermaid architecture diagram
+
+To preview the deck locally, run `npm run slides:dev`.
+To build a hostable static deck, run `npm run slides:build`; it writes the output to `.artifacts/slidev/pr-concierge-architecture` at the repository root.
+Rendered PDF, PNG, and PPTX exports are intentionally not wired by default so browser-export dependencies stay optional.
 
 ## What is included
 
@@ -11,6 +20,7 @@ The HTTP layer now runs on [Hono](https://hono.dev/) so the project uses Hono ro
 - AWS Lambda export via `hono/aws-lambda`
 - local Node.js server via `@hono/node-server`
 - Hono middleware for request IDs, access logging, pretty JSON, and secure headers
+- official GitHub pull request payload validation via Ajv and `@octokit/webhooks-schemas`
 - deterministic risk scoring from changed file paths
 - branch naming and optional required-label checks
 - structured JSON logging

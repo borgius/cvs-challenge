@@ -7,11 +7,12 @@ import { secureHeaders } from 'hono/secure-headers';
 
 import { loadAppConfig } from './config/env.ts';
 import { fetchPullRequestFiles } from './github/client.ts';
+import { validatePullRequestPayload } from './github/payload.ts';
 import { isValidGitHubSignature } from './github/signature.ts';
 import { evaluatePullRequest } from './services/evaluatePullRequest.ts';
 import { createEvaluationRepository } from './storage/evaluationRepository.ts';
 import { supportedPullRequestActions } from './types/github.ts';
-import { isPullRequestPayload, isSupportedPullRequestAction } from './utils/guards.ts';
+import { isSupportedPullRequestAction } from './utils/guards.ts';
 import { accessLogger, logger } from './utils/logger.ts';
 import { buildRawEventKey } from './utils/storageKeys.ts';
 
@@ -63,7 +64,6 @@ app.post('/webhooks/github', async (c) => {
 
   try {
     const config = loadAppConfig();
-    const repository = createEvaluationRepository(config);
     const signatureHeader = c.req.header('x-hub-signature-256');
 
     if (!isValidGitHubSignature(rawBody, signatureHeader, config.githubWebhookSecret)) {
@@ -76,10 +76,10 @@ app.post('/webhooks/github', async (c) => {
       );
     }
 
-    let payload: unknown;
+    let parsedPayload: unknown;
 
     try {
-      payload = JSON.parse(rawBody) as unknown;
+      parsedPayload = JSON.parse(rawBody) as unknown;
     } catch {
       return c.json(
         {
@@ -90,15 +90,24 @@ app.post('/webhooks/github', async (c) => {
       );
     }
 
-    if (!isPullRequestPayload(payload)) {
+    const payloadValidationResult = validatePullRequestPayload(parsedPayload);
+
+    if (!payloadValidationResult.isValid) {
+      logger.warn('GitHub webhook payload failed pull request schema validation', {
+        requestId,
+        validationErrors: payloadValidationResult.errors,
+      });
+
       return c.json(
         {
-          message: 'Unsupported GitHub pull request payload.',
+          message: 'Invalid GitHub pull request payload.',
           requestId,
         },
         400,
       );
     }
+
+    const payload = payloadValidationResult.payload;
 
     if (!isSupportedPullRequestAction(payload.action)) {
       return c.json(
@@ -135,6 +144,7 @@ app.post('/webhooks/github', async (c) => {
       config.enableRawEventArchive && config.rawEventBucketName
         ? buildRawEventKey(repositoryFullName, pullNumber, githubDeliveryId)
         : undefined;
+    const repository = createEvaluationRepository(config);
 
     const evaluation = await evaluatePullRequest({
       action: payload.action,
@@ -173,7 +183,10 @@ app.post('/webhooks/github', async (c) => {
       },
     });
   } catch (error) {
-    logger.error('Failed to process GitHub webhook', { requestId, error: error instanceof Error ? error : new Error(String(error)) });
+    logger.error('Failed to process GitHub webhook', {
+      requestId,
+      error: error instanceof Error ? error : new Error(String(error)),
+    });
 
     return c.json(
       {

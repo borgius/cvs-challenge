@@ -19,7 +19,7 @@ interface DeployedWebhookSuccessConfig {
 const loadWebhookFixture = (): PullRequestPayload =>
   JSON.parse(
     readFileSync(
-      new URL('../fixtures/github-pull-request-opened.json', import.meta.url),
+      new URL('../fixtures/github-pull-request-opened.official.json', import.meta.url),
       'utf8',
     ),
   ) as PullRequestPayload;
@@ -79,6 +79,7 @@ const buildLiveWebhookPayload = (
 ): PullRequestPayload => {
   const payload = loadWebhookFixture();
   const { owner, repo } = parseRepositoryFullName(config.repositoryFullName);
+  const existingLabels = payload.pull_request.labels ?? [];
 
   payload.action = 'opened';
   payload.number = config.pullNumber;
@@ -86,9 +87,17 @@ const buildLiveWebhookPayload = (
   payload.pull_request.head.ref = config.branchName;
   payload.pull_request.head.sha = config.headSha;
   payload.pull_request.base.ref = config.baseBranch;
-  payload.pull_request.labels = config.labels.map((name) => ({ name }));
+  payload.pull_request.labels = config.labels.length > 0
+    ? config.labels.map((name, index) => ({
+        ...(existingLabels[Math.min(index, existingLabels.length - 1)] ?? { name }),
+        name,
+      }))
+    : [];
   payload.repository.full_name = config.repositoryFullName;
-  payload.repository.owner = { login: owner };
+  payload.repository.owner = {
+    ...payload.repository.owner,
+    login: owner,
+  };
   payload.repository.name = repo;
 
   return payload;
