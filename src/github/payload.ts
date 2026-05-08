@@ -13,7 +13,17 @@ type AjvModule = typeof import('ajv');
 type AjvFormatsModule = typeof import('ajv-formats');
 const maxValidationErrorsToReport = 20;
 const githubUserViewTypePropertyName = 'user_view_type';
+const githubRepositoryHasPullRequestsPropertyName = 'has_pull_requests';
+const githubRepositoryPullRequestCreationPolicyPropertyName =
+  'pull_request_creation_policy';
+const githubRepositoryCustomPropertiesPropertyName = 'custom_properties';
 const githubUserViewTypeSchema = {
+  type: ['string', 'null'],
+} as const;
+const githubRepositoryHasPullRequestsSchema = {
+  type: 'boolean',
+} as const;
+const githubRepositoryPullRequestCreationPolicySchema = {
   type: ['string', 'null'],
 } as const;
 
@@ -49,26 +59,72 @@ const formatValidationErrors = (
 
 const cloneJsonValue = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 
+const patchSchemaObjectDefinition = (
+  definition: unknown,
+  options: {
+    properties?: Record<string, unknown>;
+    optionalPropertyNames?: string[];
+  },
+): void => {
+  if (!isJsonObject(definition)) {
+    return;
+  }
+
+  const existingProperties = isJsonObject(definition.properties)
+    ? definition.properties
+    : {};
+
+  if (options.properties) {
+    definition.properties = {
+      ...existingProperties,
+      ...options.properties,
+    };
+  }
+
+  const optionalPropertyNames = options.optionalPropertyNames;
+
+  if (optionalPropertyNames && Array.isArray(definition.required)) {
+    definition.required = definition.required.filter(
+      (requiredProperty): requiredProperty is string =>
+        typeof requiredProperty === 'string' &&
+        !optionalPropertyNames.includes(requiredProperty),
+    );
+  }
+};
+
 const patchGitHubWebhookSchemaForCurrentPullRequestPayloads = (
   schema: GitHubWebhookSchema,
 ): GitHubWebhookSchema => {
   const patchedSchema = cloneJsonValue(schema);
-  const userDefinition = patchedSchema.definitions['user'];
-
-  if (!isJsonObject(userDefinition)) {
-    return patchedSchema;
-  }
-
-  const userProperties = isJsonObject(userDefinition.properties)
-    ? userDefinition.properties
-    : {};
 
   // GitHub pull_request webhook payloads now include `user_view_type` on user objects,
   // but the latest published @octokit/webhooks-schemas package does not model it yet.
-  userDefinition.properties = {
-    ...userProperties,
-    [githubUserViewTypePropertyName]: githubUserViewTypeSchema,
-  };
+  patchSchemaObjectDefinition(patchedSchema.definitions['user'], {
+    properties: {
+      [githubUserViewTypePropertyName]: githubUserViewTypeSchema,
+    },
+  });
+
+  // The published schema also drifts from current repository payloads: `custom_properties`
+  // is not always present, while fields like `has_pull_requests` and
+  // `pull_request_creation_policy` can now appear.
+  patchSchemaObjectDefinition(patchedSchema.definitions['repository'], {
+    properties: {
+      [githubRepositoryHasPullRequestsPropertyName]: githubRepositoryHasPullRequestsSchema,
+      [githubRepositoryPullRequestCreationPolicyPropertyName]:
+        githubRepositoryPullRequestCreationPolicySchema,
+    },
+    optionalPropertyNames: [githubRepositoryCustomPropertiesPropertyName],
+  });
+
+  patchSchemaObjectDefinition(patchedSchema.definitions['repository-lite'], {
+    properties: {
+      [githubRepositoryHasPullRequestsPropertyName]: githubRepositoryHasPullRequestsSchema,
+      [githubRepositoryPullRequestCreationPolicyPropertyName]:
+        githubRepositoryPullRequestCreationPolicySchema,
+    },
+    optionalPropertyNames: [githubRepositoryCustomPropertiesPropertyName],
+  });
 
   return patchedSchema;
 };

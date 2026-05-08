@@ -50,6 +50,16 @@ const annotateGitHubUsersWithViewType = (value: unknown): void => {
   });
 };
 
+const applyCurrentGitHubRepositoryShape = (value: unknown): void => {
+  if (!isRecord(value)) {
+    return;
+  }
+
+  delete value.custom_properties;
+  value.has_pull_requests = true;
+  value.pull_request_creation_policy = 'enabled';
+};
+
 const loadWebhookFixture = (): PullRequestPayload => {
   const payload = JSON.parse(
     readFileSync(
@@ -58,7 +68,15 @@ const loadWebhookFixture = (): PullRequestPayload => {
     ),
   ) as PullRequestPayload;
 
+  const payloadRecord = payload as unknown as Record<string, unknown>;
+  const pullRequest = payloadRecord.pull_request as Record<string, unknown>;
+  const head = pullRequest.head as Record<string, unknown>;
+  const base = pullRequest.base as Record<string, unknown>;
+
   annotateGitHubUsersWithViewType(payload as unknown);
+  applyCurrentGitHubRepositoryShape(payloadRecord.repository);
+  applyCurrentGitHubRepositoryShape(head.repo);
+  applyCurrentGitHubRepositoryShape(base.repo);
 
   return payload;
 };
