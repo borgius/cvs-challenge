@@ -8,11 +8,37 @@ The HTTP layer now runs on [Hono](https://hono.dev/) so the project uses Hono ro
 ## Review artifacts
 
 - [`DECISIONS.md`](DECISIONS.md) — short design rationale for choosing API Gateway plus Lambda for the MVP and the alternatives considered
+- [`docs/ai-workflow.md`](docs/ai-workflow.md) — explicit AI workflow evidence, course corrections, and the open PR trail
 - [`diagrams/pr-concierge-architecture.slidev.md`](diagrams/pr-concierge-architecture.slidev.md) — reviewer-facing Slidev deck with the committed Mermaid architecture diagram
+- [`diagrams/pr-concierge-architecture.svg`](diagrams/pr-concierge-architecture.svg) — static architecture export for quick repo browsing and interview walkthroughs
+- [`diagrams/PR Concierge Architecture Review - Slidev.pdf`](diagrams/PR%20Concierge%20Architecture%20Review%20-%20Slidev.pdf) — committed deck export for offline review
 
 To preview the deck locally, run `npm run slides:dev`.
 To build a hostable static deck, run `npm run slides:build`; it writes the output to `.artifacts/slidev/pr-concierge-architecture` at the repository root.
 Rendered PDF, PNG, and PPTX exports are intentionally not wired by default so browser-export dependencies stay optional.
+
+## Challenge coverage at a glance
+
+| Challenge requirement | Repo evidence | How it is verified |
+| --- | --- | --- |
+| AI agent configuration in the repo | [`AGENTS.md`](AGENTS.md), [`skills-lock.json`](skills-lock.json) | committed config files in the repository root |
+| AI-assisted workflow evidence | [`docs/ai-workflow.md`](docs/ai-workflow.md), open PR [#9](https://github.com/borgius/cvs-challenge/pull/9) | visible PR history plus Copilot review activity |
+| Automation service on AWS | [`src/app.ts`](src/app.ts), [`src/services/evaluatePullRequest.ts`](src/services/evaluatePullRequest.ts), [`src/github/`](src/github/) | `npm test`, `npm run build` |
+| Terraform modules and CI/CD | [`infra/terraform/`](infra/terraform/), [`infra/bootstrap/tofu-backend/`](infra/bootstrap/tofu-backend/), [`.github/workflows/ci.yml`](.github/workflows/ci.yml), [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) | `npm run validate:infra` and the GitHub Actions workflows |
+| Observability and persistence | [`src/utils/logger.ts`](src/utils/logger.ts), [`infra/terraform/modules/observability/`](infra/terraform/modules/observability/), [`src/storage/evaluationRepository.ts`](src/storage/evaluationRepository.ts) | local integration tests, deployed smoke test, and deployed integration checks |
+| Documentation and diagrams | [`README.md`](README.md), [`DECISIONS.md`](DECISIONS.md), [`docs/ai-workflow.md`](docs/ai-workflow.md), [`diagrams/`](diagrams/) | reviewer can inspect static and Slidev diagram artifacts directly |
+| Optional deeper topic: detailed diagrams | [`diagrams/pr-concierge-architecture.slidev.md`](diagrams/pr-concierge-architecture.slidev.md), [`diagrams/pr-concierge-architecture.svg`](diagrams/pr-concierge-architecture.svg) | `npm run slides:build` |
+
+## AI-native workflow evidence
+
+This repository uses AI as a development collaborator, not as a runtime dependency.
+
+- repo-level instructions live in [`AGENTS.md`](AGENTS.md)
+- shared skill provenance is pinned in [`skills-lock.json`](skills-lock.json)
+- the human-reviewed workflow summary and course corrections live in [`docs/ai-workflow.md`](docs/ai-workflow.md)
+- the current visible evidence trail is the open PR [#9](https://github.com/borgius/cvs-challenge/pull/9)
+
+The current stance is deliberate: AI speeds up implementation, review, and documentation, while the production webhook path stays deterministic and easy to explain.
 
 ## What is included
 
@@ -24,7 +50,7 @@ Rendered PDF, PNG, and PPTX exports are intentionally not wired by default so br
 - deterministic risk scoring from changed file paths
 - branch naming and optional required-label checks
 - a GitHub-visible `pr-concierge` check run for supported pull request events, with branded detail art for public repositories
-- a deterministic CVS phrase rule: pass on `CVS is Rock`, fail on `CVS is not Rock`, and ignore the phrase when it is absent
+- an example content phrase rule used to prove pass/fail/skip GitHub check behavior during tests and demos
 - encrypted SSM Parameter Store runtime indirection for GitHub webhook and auth inputs, with deployment scripts updating secret values outside OpenTofu state
 - structured JSON logging
 - DynamoDB-backed evaluation persistence for deployed environments, with console logging available for local development
@@ -32,7 +58,8 @@ Rendered PDF, PNG, and PPTX exports are intentionally not wired by default so br
 - a separate OpenTofu bootstrap root for the remote state bucket and DynamoDB lock table
 - deployment scripts in `scripts/` that bootstrap the backend once, package the Lambda artifact, and drive `tofu init`, `tofu apply`, and `tofu destroy`
 - Vitest integration suites for the local Lambda handler and the deployed HTTP API
-- GitHub Actions workflows that build, test, validate both OpenTofu roots, and deploy to AWS through the repository's Bash automation
+- OpenTofu validation tests that exercise root input guardrails without requiring AWS credentials
+- GitHub Actions workflows that build, test, run OpenTofu validation checks for both roots, and deploy to AWS through the repository's Bash automation
 
 ## Quick start
 
@@ -41,8 +68,9 @@ Rendered PDF, PNG, and PPTX exports are intentionally not wired by default so br
 3. Install dependencies with `npm install` if you have not already.
 4. Build the project with `npm run build`.
 5. Run `npm test` to type-check the app and execute the local Lambda integration suite.
-6. Run `npm run dev` to start the local Hono server on port `3000`.
-7. Call `GET /health` or send a GitHub webhook to `POST /webhooks/github`.
+6. Run `npm run validate:infra` if you are changing OpenTofu modules, deployment scripts, or CI workflows.
+7. Run `npm run dev` to start the local Hono server on port `3000`.
+8. Call `GET /health` or send a GitHub webhook to `POST /webhooks/github`.
 
 ## Integration tests
 
@@ -84,6 +112,18 @@ Optional overrides for the live success-path payload are also supported:
 
 If the URL overrides and deployment summary are both missing, the deployed suite stops with a clear resolution error. If the live webhook variables are missing, the success-path test is skipped.
 
+## Infrastructure validation
+
+Run `npm run validate:infra` when you change the OpenTofu roots, env examples, or deployment workflows.
+
+That command runs:
+
+- `tofu fmt -check -recursive` under `infra/`
+- `tofu init -backend=false -input=false` and `tofu validate` for both OpenTofu roots
+- plan-mode OpenTofu validation tests under `infra/bootstrap/tofu-backend/tests/` and `infra/terraform/modules/http_api/tests/`
+
+The test files only exercise input validation guardrails, so they do not require AWS credentials or create live infrastructure. The full application root still uses backend-free `tofu validate`; its upstream modules include live caller-identity data sources that make root-level `tofu test` a poor fit without provider mocking.
+
 ## Environment variables
 
 Keep `.env` for local runtime values and the deployment secrets that `scripts/deploy.sh` writes to encrypted SSM parameters for the deployed Lambda runtime. Put ordinary OpenTofu root variables in `infra/terraform/env/<env>.auto.tfvars` instead.
@@ -123,7 +163,7 @@ The current deterministic checks include:
 
 - branch naming
 - optional required labels
-- the playful CVS phrase rule:
+- an example content phrase rule used in tests and demos:
   - `CVS is Rock` → pass
   - `CVS is not Rock` → fail
   - neither phrase → skip
@@ -272,8 +312,7 @@ the basic self-hook flow.
 `.github/workflows/deploy.yml` is the repository's CI/CD deploy path.
 On pushes to `main` and manual dispatches, it:
 
-- installs dependencies and runs `npm run build` plus `npm run test`
-- validates both OpenTofu roots before touching AWS
+- installs dependencies and runs `npm run build`, `npm run test`, and `npm run validate:infra`
 - authenticates to AWS with GitHub OIDC
 - derives the OpenTofu backend bucket and lock-table names from the target AWS account ID
 - runs `scripts/bootstrap-tofu-backend.sh`, `scripts/deploy.sh`, `scripts/smoke-test.sh`, and the safe deployed integration suite
@@ -281,11 +320,11 @@ On pushes to `main` and manual dispatches, it:
 Configure these GitHub Actions repository secrets before using that workflow:
 
 - `AWS_DEPLOY_ROLE_ARN` — IAM role ARN assumed by GitHub Actions through OIDC
-- `PR_CONCIERGE_GITHUB_APP_ID` — GitHub App ID passed to OpenTofu so it can refresh the encrypted SSM parameter used by Lambda at runtime
-- `PR_CONCIERGE_GITHUB_APP_PRIVATE_KEY` — GitHub App private key passed to OpenTofu so it can refresh the encrypted SSM parameter used by Lambda at runtime
+- `PR_CONCIERGE_GITHUB_APP_ID` — GitHub App ID passed to `scripts/deploy.sh` so it can refresh the encrypted SSM parameter used by Lambda at runtime
+- `PR_CONCIERGE_GITHUB_APP_PRIVATE_KEY` — GitHub App private key passed to `scripts/deploy.sh` so it can refresh the encrypted SSM parameter used by Lambda at runtime
 - `PR_CONCIERGE_GITHUB_APP_INSTALLATION_ID` — optional explicit installation ID if you do not want repository-based installation lookup
-- `PR_CONCIERGE_GITHUB_TOKEN` — optional fallback token for changed-file lookups, passed to OpenTofu so it can refresh the encrypted SSM parameter used by Lambda at runtime
-- `PR_CONCIERGE_WEBHOOK_SECRET` — webhook secret passed to OpenTofu so it can refresh the encrypted SSM parameter used by Lambda at runtime, and reused by optional deployed webhook tests
+- `PR_CONCIERGE_GITHUB_TOKEN` — optional fallback token for changed-file lookups, passed to `scripts/deploy.sh` so it can refresh the encrypted SSM parameter used by Lambda at runtime
+- `PR_CONCIERGE_WEBHOOK_SECRET` — webhook secret passed to `scripts/deploy.sh` so it can refresh the encrypted SSM parameter used by Lambda at runtime, and reused by optional deployed webhook tests
 
 Notes:
 

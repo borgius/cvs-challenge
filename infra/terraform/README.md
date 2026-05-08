@@ -38,13 +38,18 @@ Keep AWS credentials out of `.env`, `*.auto.tfvars`, and `*.s3.tfbackend` files.
 
 ## Validation workflow
 
-Use these commands from this directory when you want to validate the infrastructure locally:
+Use `npm run validate:infra` from the repository root when you want the full OpenTofu validation pass.
+
+That wrapper runs these checks for the application root, the backend bootstrap root, and the HTTP API wrapper module:
 
 - `tofu fmt -check`
 - `tofu init -backend=false -input=false`
 - `tofu validate`
+- `tofu test -filter=tests/root_validation_unit_test.tftest.hcl` for the module-level guardrail suites
 
-The GitHub Actions deploy-readiness workflow runs the same validation steps, but it does not apply infrastructure changes.
+The test files are plan-mode guardrails for input validation, so they do not need AWS credentials or create live resources. The full application root still uses backend-free `tofu validate` because upstream modules rely on live caller-identity data sources that do not mock cleanly today.
+
+The GitHub Actions workflows run the same validation steps before deployment, but they do not apply infrastructure changes during the ordinary CI path.
 
 ## Operational notes
 

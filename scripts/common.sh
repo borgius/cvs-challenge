@@ -249,7 +249,7 @@ require_github_check_runtime_auth_inputs() {
   fi
 
   if [[ -z "$github_app_id" || -z "$github_app_private_key" ]]; then
-    error "Missing GitHub App deployment inputs. Set GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY in .env or export TF_VAR_github_app_id and TF_VAR_github_app_private_key before deployment so OpenTofu can update the encrypted SSM runtime parameters."
+    error "Missing GitHub App deployment inputs. Set GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY in .env or export TF_VAR_github_app_id and TF_VAR_github_app_private_key before deployment so scripts/deploy.sh can update the encrypted SSM runtime parameters."
   fi
 }
 
