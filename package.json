@@ -10,6 +10,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "typecheck:tests": "tsc -p tsconfig.vitest.json --noEmit",
     "test": "npm run typecheck && npm run typecheck:tests && npm run test:integration:local",
+    "validate:infra": "bash scripts/validate-opentofu.sh",
     "test:integration:local": "vitest run --project local-lambda",
     "test:integration:deployed": "vitest run --project deployed",
     "dev": "node --watch src/index.ts",
@@ -43,5 +44,8 @@
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",
     "hono": "^4.12.18"
+  },
+  "overrides": {
+    "dompurify": "3.4.2"
   }
 }

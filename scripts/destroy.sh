@@ -29,12 +29,6 @@ require_file \
   "$TOFU_BACKEND_CONFIG_FILE" \
   "Missing OpenTofu backend config file: ${TOFU_BACKEND_CONFIG_FILE}. Copy infra/terraform/backend/${TOFU_ENVIRONMENT_NAME}.s3.tfbackend.example to that path and fill in the backend coordinates first."
 
-export_tofu_root_value_from_env_if_present GITHUB_WEBHOOK_SECRET github_webhook_secret
-export_tofu_root_value_from_env_if_present GITHUB_TOKEN github_token
-export_tofu_root_value_from_env_if_present GITHUB_APP_ID github_app_id
-export_tofu_root_value_from_env_if_present GITHUB_APP_PRIVATE_KEY github_app_private_key
-export_tofu_root_value_from_env_if_present GITHUB_APP_INSTALLATION_ID github_app_installation_id
-
 ensure_artifact_exists() {
   if [[ -f "$ARTIFACT_PATH" ]]; then
     info "Using existing Lambda artifact at $ARTIFACT_PATH"
