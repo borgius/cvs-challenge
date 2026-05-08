@@ -256,6 +256,7 @@ describe('local Lambda webhook integration', () => {
     expect(response.statusCode).toBe(400);
     expect(body).toMatchObject({
       message: 'GitHub webhook requests must include a body.',
+      details: 'The webhook request body was empty.',
       requestId: 'local-empty-body-request-id',
     });
   });
@@ -281,7 +282,47 @@ describe('local Lambda webhook integration', () => {
     expect(response.statusCode).toBe(401);
     expect(body).toMatchObject({
       message: 'Invalid GitHub signature.',
+      details:
+        'The x-hub-signature-256 header did not match the request body and configured webhook secret.',
       requestId: 'local-invalid-signature-request-id',
+    });
+  });
+
+  it('returns details when webhook processing fails after payload validation', async () => {
+    applyLocalTestEnv();
+
+    const payload = buildSuccessfulWebhookPayload({
+      body: 'This change proves that CVS is Rock.',
+    });
+    const rawBody = JSON.stringify(payload);
+    const fetchMock = vi.fn(async () => {
+      throw new Error('Synthetic GitHub API failure');
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await handler(
+      buildHttpApiV2Event({
+        method: 'POST',
+        path: '/webhooks/github',
+        headers: {
+          'content-type': 'application/json',
+          'x-hub-signature-256': createGitHubSignature(
+            rawBody,
+            localTestEnvDefaults.GITHUB_WEBHOOK_SECRET,
+          ),
+        },
+        body: rawBody,
+      }),
+      createLambdaContext('local-processing-error-request-id'),
+    );
+    const body = parseJsonBody(response);
+
+    expect(response.statusCode).toBe(500);
+    expect(body).toMatchObject({
+      message: 'Failed to process GitHub webhook.',
+      details: 'Synthetic GitHub API failure',
+      requestId: 'local-processing-error-request-id',
     });
   });
 

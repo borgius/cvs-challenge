@@ -15,7 +15,10 @@ import {
   createGitHubCheckRun,
   deriveGitHubCheckConclusion,
 } from './github/checks.ts';
-import { validatePullRequestPayload } from './github/payload.ts';
+import {
+  validatePullRequestPayload,
+  type PullRequestPayloadValidationError,
+} from './github/payload.ts';
 import { isValidGitHubSignature } from './github/signature.ts';
 import { evaluatePullRequest } from './services/evaluatePullRequest.ts';
 import { createEvaluationRepository } from './storage/evaluationRepository.ts';
@@ -33,6 +36,21 @@ type AppEnv = {
   Bindings: AppBindings;
   Variables: RequestIdVariables;
 };
+
+type ErrorResponseDetails = string | PullRequestPayloadValidationError[];
+
+const describeUnknownError = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+
+const buildErrorResponseBody = (
+  message: string,
+  requestId: string,
+  details: ErrorResponseDetails,
+) => ({
+  message,
+  details,
+  requestId,
+});
 
 
 export const app = new Hono<AppEnv>();
@@ -62,10 +80,11 @@ app.post('/webhooks/github', async (c) => {
 
   if (!rawBody) {
     return c.json(
-      {
-        message: 'GitHub webhook requests must include a body.',
+      buildErrorResponseBody(
+        'GitHub webhook requests must include a body.',
         requestId,
-      },
+        'The webhook request body was empty.',
+      ),
       400,
     );
   }
@@ -76,10 +95,11 @@ app.post('/webhooks/github', async (c) => {
 
     if (!isValidGitHubSignature(rawBody, signatureHeader, config.githubWebhookSecret)) {
       return c.json(
-        {
-          message: 'Invalid GitHub signature.',
+        buildErrorResponseBody(
+          'Invalid GitHub signature.',
           requestId,
-        },
+          'The x-hub-signature-256 header did not match the request body and configured webhook secret.',
+        ),
         401,
       );
     }
@@ -90,10 +110,11 @@ app.post('/webhooks/github', async (c) => {
       parsedPayload = JSON.parse(rawBody) as unknown;
     } catch {
       return c.json(
-        {
-          message: 'GitHub webhook payload must be valid JSON.',
+        buildErrorResponseBody(
+          'GitHub webhook payload must be valid JSON.',
           requestId,
-        },
+          'The webhook request body could not be parsed as JSON.',
+        ),
         400,
       );
     }
@@ -107,11 +128,11 @@ app.post('/webhooks/github', async (c) => {
       });
 
       return c.json(
-        {
-          message: 'Invalid GitHub pull request payload.',
-          details: payloadValidationResult.errors,
+        buildErrorResponseBody(
+          'Invalid GitHub pull request payload.',
           requestId,
-        },
+          payloadValidationResult.errors,
+        ),
         400,
       );
     }
@@ -133,10 +154,11 @@ app.post('/webhooks/github', async (c) => {
 
     if (!pullNumber) {
       return c.json(
-        {
-          message: 'Pull request number is missing from the webhook payload.',
+        buildErrorResponseBody(
+          'Pull request number is missing from the webhook payload.',
           requestId,
-        },
+          'Expected number or pull_request.number in the webhook payload.',
+        ),
         400,
       );
     }
@@ -146,10 +168,11 @@ app.post('/webhooks/github', async (c) => {
 
     if (!headSha) {
       return c.json(
-        {
-          message: 'Pull request head SHA is missing from the webhook payload.',
+        buildErrorResponseBody(
+          'Pull request head SHA is missing from the webhook payload.',
           requestId,
-        },
+          'Expected pull_request.head.sha in the webhook payload.',
+        ),
         400,
       );
     }
@@ -266,10 +289,11 @@ app.post('/webhooks/github', async (c) => {
     });
 
     return c.json(
-      {
-        message: 'Failed to process GitHub webhook.',
+      buildErrorResponseBody(
+        'Failed to process GitHub webhook.',
         requestId,
-      },
+        describeUnknownError(error),
+      ),
       500,
     );
   }
@@ -277,10 +301,11 @@ app.post('/webhooks/github', async (c) => {
 
 app.notFound((c) =>
   c.json(
-    {
-      message: 'Route not found.',
-      requestId: c.get('requestId'),
-    },
+    buildErrorResponseBody(
+      'Route not found.',
+      c.get('requestId'),
+      `No route matches ${c.req.method} ${c.req.path}.`,
+    ),
     404,
   ),
 );
