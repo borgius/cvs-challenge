@@ -17,6 +17,7 @@ The HTTP layer uses Hono. The local server and AWS Lambda handler both come from
 Before making architecture or workflow changes, read these files:
 
 - `README.md` for the current scaffold, route list, and environment variables
+- `docs/ai-workflow.md` for the current AI workflow evidence and course corrections
 - `docs/project-overview.md` for the intended product and AWS target architecture
 - `docs/build-by-stages.md` and `docs/multiagent-stage-briefs.md` for planning context
 
@@ -44,6 +45,7 @@ Use `npm` in this repository. The lockfile is `package-lock.json`.
 
 - Install dependencies: `npm install`
 - Build the app: `npm run build`
+- Validate the OpenTofu roots: `npm run validate:infra`
 - Type-check only: `npm run typecheck`
 - Type-check the Vitest harness: `npm run typecheck:tests`
 - Run the default local verification command: `npm run test`
@@ -59,13 +61,13 @@ Local development is most reliable on the same major Node version used in CI. Th
 
 Use `.env.example` as the canonical template. `.env` is gitignored.
 
-Keep `.env` focused on local runtime values and the deployment secrets that OpenTofu stores in encrypted SSM parameters for the deployed Lambda runtime:
+Keep `.env` focused on local runtime values and the deployment secrets that `scripts/deploy.sh` writes to encrypted SSM parameters for the deployed Lambda runtime:
 
-- `GITHUB_WEBHOOK_SECRET` — required for local direct-env signature validation, reused by `scripts/configure-self-webhook.sh`, and used by OpenTofu to refresh the deployed webhook secret SSM parameter
-- `GITHUB_APP_ID` — required for local direct-env GitHub App auth and used by OpenTofu to refresh the deployed GitHub App ID SSM parameter
-- `GITHUB_APP_PRIVATE_KEY` — required for local direct-env GitHub App auth and used by OpenTofu to refresh the deployed GitHub App private key SSM parameter; use the PEM value directly or store it on one line with escaped newlines in `.env`
+- `GITHUB_WEBHOOK_SECRET` — required for local direct-env signature validation, reused by `scripts/configure-self-webhook.sh`, and used by `scripts/deploy.sh` to refresh the deployed webhook secret SSM parameter
+- `GITHUB_APP_ID` — required for local direct-env GitHub App auth and used by `scripts/deploy.sh` to refresh the deployed GitHub App ID SSM parameter
+- `GITHUB_APP_PRIVATE_KEY` — required for local direct-env GitHub App auth and used by `scripts/deploy.sh` to refresh the deployed GitHub App private key SSM parameter; use the PEM value directly or store it on one line with escaped newlines in `.env`
 - `GITHUB_APP_INSTALLATION_ID` — optional explicit installation ID for local direct-env auth and deploys
-- `GITHUB_TOKEN` — optional fallback for changed-file lookups; do not reuse it as the repository-admin token for webhook management
+- `GITHUB_TOKEN` — optional fallback for changed-file lookups; when present, `scripts/deploy.sh` refreshes the deployed fallback-token SSM parameter. Do not reuse it as the repository-admin token for webhook management
 - `GITHUB_WEBHOOK_SECRET_SSM_PARAMETER_NAME` — optional runtime override used when you want the app to read the webhook secret from SSM instead of direct env
 - `GITHUB_APP_ID_SSM_PARAMETER_NAME` — optional runtime override for `GITHUB_APP_ID`
 - `GITHUB_APP_PRIVATE_KEY_SSM_PARAMETER_NAME` — optional runtime override for `GITHUB_APP_PRIVATE_KEY`
@@ -117,6 +119,7 @@ Notes:
 
 The repo now uses Vitest for integration coverage.
 `npm run test` type-checks the production source, type-checks the Vitest harness, and runs the local Lambda integration suite.
+`npm run validate:infra` checks OpenTofu formatting, runs backend-free init and validate for both roots, and executes the plan-mode input-validation tests for the backend bootstrap root and HTTP API wrapper module.
 `npm run test:integration:deployed` runs the deployed HTTP API suite and expects either `DEPLOYED_HEALTH_URL` / `DEPLOYED_WEBHOOK_URL` or `.artifacts/<service>-deployment.json`.
 The deployed suite keeps its default checks safe by covering `GET /health`, empty-body webhook rejection, and invalid-signature rejection. A real deployed webhook success-path case is opt-in and skipped unless `DEPLOYED_WEBHOOK_SECRET`, `DEPLOYED_PR_REPOSITORY`, and `DEPLOYED_PR_NUMBER` are set.
 The local Lambda suite now also verifies the mocked GitHub check-run create/update flow and the pass/fail/skip outcomes of the CVS phrase rule.
@@ -131,6 +134,7 @@ Commands verified in this repository:
 
 - `npm run build`
 - `npm run test`
+- `npm run validate:infra`
 - `npm run test:integration:deployed`
 - `tofu fmt -check`
 - `tofu init -backend=false -input=false`
@@ -154,7 +158,7 @@ Before finishing a change, run the relevant app checks plus any targeted tests y
 - Keep explicit `.ts` extensions in relative imports inside `src/`.
 - Prefer `import type` for type-only imports.
 - Follow the existing style: semicolons, trailing commas, named exports, and small focused helpers.
-- Keep logs structured. Existing code uses `console.log(JSON.stringify({...}))` and similar JSON logging patterns.
+- Keep logs structured. Existing code uses AWS Lambda Powertools logging and JSON-friendly metadata.
 - New JSON API responses should stay consistent with the existing routes: clear message, useful metadata, and `requestId` where available.
 - When changing environment variables or public behavior, update `.env.example`, `README.md`, and any affected docs in the same change.
 
@@ -164,7 +168,7 @@ Before finishing a change, run the relevant app checks plus any targeted tests y
 
 The root uses an S3 backend configured at init time, with DynamoDB used for state locking. The steady-state deploy and destroy scripts read backend coordinates from `infra/terraform/backend/<env>.s3.tfbackend` and non-secret root variables from `infra/terraform/env/<env>.auto.tfvars`.
 
-The deploy and destroy scripts reserve `TF_VAR_...` for the remaining GitHub values that OpenTofu writes to encrypted SSM Parameter Store for the deployed runtime. AWS credentials stay on the AWS credential chain rather than in repo-local config files.
+The deploy script reads the remaining GitHub values from `.env` or legacy `TF_VAR_...` exports, writes them to encrypted SSM Parameter Store with AWS CLI, and passes only SSM parameter names into OpenTofu. AWS credentials stay on the AWS credential chain rather than in repo-local config files.
 
 `scripts/deploy.sh` imports the Lambda function, IAM role, and Lambda log group into OpenTofu state when those resources already exist from an earlier manual or partially managed deployment.
 
@@ -192,7 +196,7 @@ The workflow deploy path intentionally still runs through `scripts/bootstrap-tof
 - Keep secrets in `.env` locally and in secret managers or CI configuration remotely.
 - Keep GitHub repository-admin auth for webhook management separate from the Lambda runtime GitHub App credentials and any optional `GITHUB_TOKEN` fallback. Use GitHub CLI auth or a dedicated `GH_TOKEN` when running `scripts/configure-self-webhook.sh`.
 - Keep AWS provider and backend credentials out of `.env`, `*.auto.tfvars`, and `*.s3.tfbackend` files. Use the AWS credential chain instead.
-- Remember that the GitHub runtime values still land in OpenTofu state today because OpenTofu manages the encrypted SSM parameter values. Protect the backend bucket and lock table accordingly.
+- Remember that historical OpenTofu state revisions may still contain GitHub runtime values from older deployments that managed encrypted SSM parameter values directly. Protect the backend bucket and lock table accordingly, and rotate credentials after migrating older environments.
 - If you add AWS integrations, document the required IAM permissions and environment variables.
 - Prefer least-privilege changes in Terraform and keep security-sensitive behavior explicit and reviewable.
 

@@ -3,7 +3,7 @@
 ## Goal
 
 PR Concierge is a small internal platform service for pull request hygiene and release awareness.
-When GitHub sends a pull request webhook, the service validates the request, applies a few platform rules, scores the PR risk, stores the result, and returns a short report that developers can act on.
+When GitHub sends a pull request webhook, the service validates the request, applies a few platform rules, scores the PR risk, stores the evaluation, publishes a `pr-concierge` check on the PR, and returns a short report that developers can act on.
 
 This project is intentionally small. The goal is to ship a clean MVP in about 3 hours, not to build a full developer portal.
 
@@ -31,9 +31,10 @@ This project is intentionally small. The goal is to ship a clean MVP in about 3 
    - branch naming
    - optional required labels
    - risk score from changed paths
-6. The service stores the evaluation in DynamoDB.
-7. The service optionally stores the raw event JSON in S3.
-8. The service returns or posts a short summary such as:
+6. The service creates or updates a `pr-concierge` GitHub check run on the PR head SHA.
+7. The service stores the evaluation in DynamoDB.
+8. The service optionally stores the raw event JSON in S3.
+9. The service returns a short summary, and reviewers can also read the PR check details, such as:
    - `risk: high`
    - `branch naming: pass`
    - `changed areas: terraform, iam`
@@ -48,6 +49,7 @@ The MVP should include:
 - GitHub webhook signature validation
 - PR event handling for `opened`, `synchronize`, and `reopened`
 - Risk classification from changed files
+- GitHub check publication for supported PR events
 - DynamoDB record for each evaluation
 - Structured JSON logging
 - CloudWatch alarm for Lambda errors
@@ -71,6 +73,7 @@ Main components:
 - GitHub Webhook
 - API Gateway HTTP API
 - Lambda service written in TypeScript
+- GitHub Checks API feedback on the pull request
 - DynamoDB table for evaluation results
 - Optional S3 bucket for raw payload archive
 - CloudWatch logs, metrics, and alarms
@@ -127,7 +130,7 @@ Optional fields:
 ## Security model
 
 - GitHub webhook secret stored in SSM Parameter Store or Secrets Manager
-- GitHub token stored in SSM Parameter Store or Secrets Manager
+- GitHub App credentials and optional fallback token stored in SSM Parameter Store or Secrets Manager
 - Least-privilege IAM for Lambda, DynamoDB, S3, CloudWatch, and SNS
 - GitHub Actions deploys with AWS OIDC, not long-lived AWS keys
 
@@ -158,10 +161,10 @@ A good demo should show:
 
 1. OpenTofu plan or deployed stack screenshot
 2. GitHub webhook hitting the service
-3. Evaluation saved in DynamoDB
-4. Logs in CloudWatch
-5. Alarm wiring via SNS
-6. Optional GitHub comment on the PR
+3. `pr-concierge` check updated on the pull request
+4. Evaluation saved in DynamoDB
+5. Logs in CloudWatch
+6. Alarm wiring via SNS
 
 ## Non-goals
 

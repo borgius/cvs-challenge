@@ -1,0 +1,108 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" role="img" aria-labelledby="title desc">
+  <title id="title">PR Concierge architecture</title>
+  <desc id="desc">Static architecture diagram showing GitHub pull request webhooks flowing through API Gateway to a Lambda service, which reads GitHub pull request files, updates a PR check, stores evaluations in DynamoDB, optionally archives raw events to S3, and emits logs, alarms, and SNS notifications.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0f172a" />
+      <stop offset="100%" stop-color="#111827" />
+    </linearGradient>
+    <linearGradient id="panel" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#111827" />
+      <stop offset="100%" stop-color="#1e293b" />
+    </linearGradient>
+    <linearGradient id="lambda" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1d4ed8" />
+      <stop offset="100%" stop-color="#7c3aed" />
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#22d3ee" />
+      <stop offset="100%" stop-color="#60a5fa" />
+    </linearGradient>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="10" markerHeight="10" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#67e8f9" />
+    </marker>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="20" stdDeviation="18" flood-color="#020617" flood-opacity="0.35" />
+    </filter>
+    <style>
+      .title { font: 700 48px Inter, Arial, sans-serif; fill: #f8fafc; }
+      .subtitle { font: 400 24px Inter, Arial, sans-serif; fill: #cbd5e1; }
+      .section { font: 700 18px Inter, Arial, sans-serif; letter-spacing: 0.12em; text-transform: uppercase; fill: #93c5fd; }
+      .card-title { font: 700 28px Inter, Arial, sans-serif; fill: #f8fafc; }
+      .card-copy { font: 400 21px Inter, Arial, sans-serif; fill: #dbeafe; }
+      .small-copy { font: 400 20px Inter, Arial, sans-serif; fill: #cbd5e1; }
+      .chip { font: 700 18px Inter, Arial, sans-serif; fill: #e0f2fe; }
+      .line { stroke: #67e8f9; stroke-width: 6; fill: none; marker-end: url(#arrow); }
+      .dashed { stroke-dasharray: 14 12; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="900" fill="url(#bg)" />
+  <rect x="52" y="48" width="1496" height="804" rx="36" fill="none" stroke="#1e3a8a" stroke-opacity="0.45" stroke-width="2" />
+
+  <text x="88" y="110" class="title">PR Concierge architecture</text>
+  <text x="88" y="148" class="subtitle">Webhook-driven PR evaluation with durable storage, reviewer feedback, and explicit operational signals.</text>
+
+  <g filter="url(#shadow)">
+    <rect x="110" y="260" width="220" height="140" rx="28" fill="url(#panel)" stroke="#334155" stroke-width="2" />
+    <text x="140" y="315" class="section">Ingress</text>
+    <text x="140" y="355" class="card-title">GitHub</text>
+    <text x="140" y="388" class="card-copy">pull_request webhook</text>
+
+    <rect x="400" y="260" width="260" height="140" rx="28" fill="url(#panel)" stroke="#334155" stroke-width="2" />
+    <text x="430" y="315" class="section">API</text>
+    <text x="430" y="355" class="card-title">API Gateway</text>
+    <text x="430" y="388" class="card-copy">HTTP API</text>
+
+    <rect x="750" y="218" width="360" height="224" rx="32" fill="url(#lambda)" stroke="#93c5fd" stroke-width="2" />
+    <text x="790" y="282" class="section">Runtime</text>
+    <text x="790" y="328" class="card-title">Lambda + Hono</text>
+    <text x="790" y="368" class="card-copy">validate signature and payload</text>
+    <text x="790" y="402" class="card-copy">fetch changed files</text>
+    <text x="790" y="436" class="card-copy">score risk and publish result</text>
+
+    <rect x="1210" y="160" width="280" height="128" rx="28" fill="url(#panel)" stroke="#334155" stroke-width="2" />
+    <text x="1240" y="210" class="section">Read path</text>
+    <text x="1240" y="246" class="card-title">GitHub API</text>
+    <text x="1240" y="278" class="card-copy">PR files and metadata</text>
+
+    <rect x="1210" y="340" width="280" height="128" rx="28" fill="url(#panel)" stroke="#334155" stroke-width="2" />
+    <text x="1240" y="390" class="section">Feedback</text>
+    <text x="1240" y="426" class="card-title">GitHub PR check</text>
+    <text x="1240" y="458" class="card-copy">status and branded details</text>
+
+    <rect x="740" y="560" width="300" height="120" rx="28" fill="url(#panel)" stroke="#334155" stroke-width="2" />
+    <text x="770" y="610" class="section">Persistence</text>
+    <text x="770" y="646" class="card-title">DynamoDB</text>
+    <text x="770" y="678" class="card-copy">evaluation records</text>
+
+    <rect x="1100" y="560" width="300" height="120" rx="28" fill="url(#panel)" stroke="#334155" stroke-width="2" />
+    <text x="1130" y="610" class="section">Optional archive</text>
+    <text x="1130" y="646" class="card-title">S3 bucket</text>
+    <text x="1130" y="678" class="card-copy">raw event payloads</text>
+
+    <rect x="200" y="580" width="260" height="110" rx="28" fill="url(#panel)" stroke="#334155" stroke-width="2" />
+    <text x="230" y="626" class="section">Logs</text>
+    <text x="230" y="660" class="card-title">CloudWatch Logs</text>
+
+    <rect x="220" y="744" width="300" height="96" rx="24" fill="url(#panel)" stroke="#334155" stroke-width="2" />
+    <text x="250" y="790" class="section">Alerts</text>
+    <text x="250" y="822" class="card-title">CloudWatch alarms + SNS</text>
+  </g>
+
+  <path class="line" d="M 330 330 C 355 330, 370 330, 400 330" />
+  <path class="line" d="M 660 330 C 695 330, 710 330, 750 330" />
+  <path class="line" d="M 1110 280 C 1155 255, 1170 245, 1210 224" />
+  <path class="line" d="M 1110 380 C 1155 390, 1170 396, 1210 404" />
+  <path class="line" d="M 920 442 C 920 488, 920 520, 920 560" />
+  <path class="line dashed" d="M 1010 452 C 1090 506, 1140 530, 1215 560" />
+  <path class="line" d="M 780 442 C 680 540, 560 600, 460 626" />
+  <path class="line" d="M 330 690 C 330 718, 330 730, 330 744" />
+
+  <g>
+    <rect x="86" y="180" width="474" height="46" rx="20" fill="url(#accent)" fill-opacity="0.14" stroke="#38bdf8" stroke-opacity="0.35" />
+    <text x="112" y="210" class="chip">Deterministic runtime decisions • GitHub App auth • OpenTofu-managed AWS footprint</text>
+  </g>
+
+  <text x="110" y="864" class="small-copy">Static export for reviewer-friendly repo browsing. Source deck: diagrams/pr-concierge-architecture.slidev.md</text>
+</svg>
