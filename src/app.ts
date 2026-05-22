@@ -13,6 +13,7 @@ import {
 import { fetchPullRequestFiles } from './github/client.ts';
 import {
   buildCompletedGitHubCheckOutput,
+  buildGitHubCheckBrandingImageUrl,
   buildFailedGitHubCheckOutput,
   buildGitHubCheckExternalId,
   completeGitHubCheckRun,
@@ -23,6 +24,7 @@ import {
   validatePullRequestPayload,
   type PullRequestPayloadValidationError,
 } from './github/payload.ts';
+import { parseGitHubRepositoryFullName } from './github/repository.ts';
 import { isValidGitHubSignature } from './github/signature.ts';
 import { evaluatePullRequest } from './services/evaluatePullRequest.ts';
 import { createEvaluationRepository } from './storage/evaluationRepository.ts';
@@ -43,8 +45,21 @@ type AppEnv = {
 
 type ErrorResponseDetails = string | PullRequestPayloadValidationError[];
 
-const describeUnknownError = (error: unknown): string =>
-  error instanceof Error ? error.message : String(error);
+const maxWebhookBodyBytes = 1_000_000;
+const internalWebhookErrorDetails =
+  'The webhook could not be processed. Use the requestId to inspect service logs.';
+
+const parseContentLength = (contentLengthHeader: string | undefined): number | undefined => {
+  if (!contentLengthHeader) {
+    return undefined;
+  }
+
+  const parsedContentLength = Number.parseInt(contentLengthHeader, 10);
+
+  return Number.isInteger(parsedContentLength) && parsedContentLength >= 0
+    ? parsedContentLength
+    : undefined;
+};
 
 const buildErrorResponseBody = (
   message: string,
@@ -80,6 +95,19 @@ app.get('/health', (c) =>
 
 app.post('/webhooks/github', async (c) => {
   const requestId = c.get('requestId');
+  const contentLength = parseContentLength(c.req.header('content-length'));
+
+  if (contentLength !== undefined && contentLength > maxWebhookBodyBytes) {
+    return c.json(
+      buildErrorResponseBody(
+        'GitHub webhook request body is too large.',
+        requestId,
+        `Webhook request bodies must be ${maxWebhookBodyBytes} bytes or smaller.`,
+      ),
+      413,
+    );
+  }
+
   const rawBody = await c.req.text();
 
   if (!rawBody) {
@@ -90,6 +118,17 @@ app.post('/webhooks/github', async (c) => {
         'The webhook request body was empty.',
       ),
       400,
+    );
+  }
+
+  if (Buffer.byteLength(rawBody, 'utf8') > maxWebhookBodyBytes) {
+    return c.json(
+      buildErrorResponseBody(
+        'GitHub webhook request body is too large.',
+        requestId,
+        `Webhook request bodies must be ${maxWebhookBodyBytes} bytes or smaller.`,
+      ),
+      413,
     );
   }
 
@@ -168,6 +207,20 @@ app.post('/webhooks/github', async (c) => {
     }
 
     const repositoryFullName = payload.repository.full_name;
+
+    try {
+      parseGitHubRepositoryFullName(repositoryFullName);
+    } catch {
+      return c.json(
+        buildErrorResponseBody(
+          'Invalid GitHub repository name.',
+          requestId,
+          'Expected repository.full_name in owner/repo format with GitHub-safe characters.',
+        ),
+        400,
+      );
+    }
+
     const headSha = payload.pull_request.head.sha;
 
     if (!headSha) {
@@ -194,6 +247,12 @@ app.post('/webhooks/github', async (c) => {
       headSha,
       githubDeliveryId,
     );
+    const checkBrandingImageUrl = payload.repository.private
+      ? undefined
+      : buildGitHubCheckBrandingImageUrl(
+          repositoryFullName,
+          payload.repository.default_branch ?? 'main',
+        );
     let checkRunId: number | undefined;
     let githubChecksToken: string | undefined;
 
@@ -208,6 +267,9 @@ app.post('/webhooks/github', async (c) => {
         githubToken: githubChecksToken,
         headSha,
         externalId: checkRunExternalId,
+        ...(checkBrandingImageUrl === undefined
+          ? {}
+          : { brandingImageUrl: checkBrandingImageUrl }),
       });
 
       checkRunId = createdCheckRun.id;
@@ -244,7 +306,7 @@ app.post('/webhooks/github', async (c) => {
         githubToken: githubChecksToken,
         checkRunId,
         conclusion: checkConclusion,
-        output: buildCompletedGitHubCheckOutput(evaluation),
+        output: buildCompletedGitHubCheckOutput(evaluation, checkBrandingImageUrl),
       });
 
       logger.info('Pull request evaluation completed', {
@@ -278,7 +340,7 @@ app.post('/webhooks/github', async (c) => {
             githubToken: githubChecksToken,
             checkRunId,
             conclusion: 'failure',
-            output: buildFailedGitHubCheckOutput(requestId),
+            output: buildFailedGitHubCheckOutput(requestId, checkBrandingImageUrl),
           });
         } catch (checkRunError) {
           logger.error('Failed to complete GitHub check run after webhook error', {
@@ -306,7 +368,7 @@ app.post('/webhooks/github', async (c) => {
       buildErrorResponseBody(
         'Failed to process GitHub webhook.',
         requestId,
-        describeUnknownError(error),
+        internalWebhookErrorDetails,
       ),
       500,
     );

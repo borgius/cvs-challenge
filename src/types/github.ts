@@ -24,6 +24,8 @@ export interface PullRequestPayload {
   };
   repository: {
     full_name: string;
+    default_branch?: string;
+    private?: boolean;
     owner?: {
       login: string;
     };

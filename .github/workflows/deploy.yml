@@ -70,25 +70,8 @@ jobs:
         with:
           tofu_wrapper: false
 
-      - name: OpenTofu format check
-        working-directory: infra
-        run: tofu fmt -check -recursive
-
-      - name: OpenTofu init (backend bootstrap root)
-        working-directory: infra/bootstrap/tofu-backend
-        run: tofu init -backend=false -input=false
-
-      - name: OpenTofu validate (backend bootstrap root)
-        working-directory: infra/bootstrap/tofu-backend
-        run: tofu validate -no-color
-
-      - name: OpenTofu init (application stack)
-        working-directory: infra/terraform
-        run: tofu init -backend=false -input=false
-
-      - name: OpenTofu validate (application stack)
-        working-directory: infra/terraform
-        run: tofu validate -no-color
+      - name: Run OpenTofu validation workflow
+        run: npm run validate:infra
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4

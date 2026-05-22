@@ -55,42 +55,31 @@ variable "log_retention_in_days" {
   default     = 14
 }
 
-variable "github_webhook_secret" {
-  description = "Webhook secret stored in encrypted SSM Parameter Store for runtime signature validation."
+variable "github_webhook_secret_ssm_parameter_name" {
+  description = "SSM Parameter Store name containing the webhook secret for runtime signature validation."
   type        = string
-  default     = null
-  sensitive   = true
 }
 
-variable "github_token" {
-  description = "Optional GitHub token stored in encrypted SSM Parameter Store for changed-file lookup fallback."
-  type        = string
-  default     = null
-  sensitive   = true
-}
-
-variable "github_app_id" {
-  description = "GitHub App ID stored in encrypted SSM Parameter Store for check-run authentication."
+variable "github_token_ssm_parameter_name" {
+  description = "Optional SSM Parameter Store name containing the GitHub token fallback for changed-file lookup."
   type        = string
   default     = null
 }
 
-variable "github_app_private_key" {
-  description = "GitHub App private key stored in encrypted SSM Parameter Store for installation token minting."
+variable "github_app_id_ssm_parameter_name" {
+  description = "SSM Parameter Store name containing the GitHub App ID for check-run authentication."
   type        = string
-  default     = null
-  sensitive   = true
 }
 
-variable "github_app_installation_id" {
-  description = "Optional GitHub App installation ID stored in encrypted SSM Parameter Store to skip installation lookup."
+variable "github_app_private_key_ssm_parameter_name" {
+  description = "SSM Parameter Store name containing the GitHub App private key for installation token minting."
   type        = string
-  default     = null
 }
 
-variable "github_ssm_parameter_path_prefix" {
-  description = "SSM Parameter Store path prefix used to store GitHub runtime inputs."
+variable "github_app_installation_id_ssm_parameter_name" {
+  description = "Optional SSM Parameter Store name containing the GitHub App installation ID override."
   type        = string
+  default     = null
 }
 
 variable "evaluations_table_name" {

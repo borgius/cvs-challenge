@@ -3,10 +3,9 @@
 #
 # This file is for non-secret root module inputs only.
 # Keep AWS credentials out of tfvars files and backend files.
-# Keep application secrets out of this file too; the deploy and destroy scripts
-# pass those through TF_VAR_github_webhook_secret, TF_VAR_github_app_id,
-# TF_VAR_github_app_private_key, the optional TF_VAR_github_app_installation_id,
-# and the optional TF_VAR_github_token fallback.
+# Keep application secrets out of this file too; `scripts/deploy.sh` reads those
+# from `.env` or matching legacy `TF_VAR_...` exports and writes them to SSM
+# separately from OpenTofu state.
 
 aws_region  = "us-east-1"
 environment = "dev"

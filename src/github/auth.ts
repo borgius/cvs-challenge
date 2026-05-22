@@ -1,6 +1,7 @@
 import { createSign } from 'node:crypto';
 
 import type { AppConfig } from '../config/env.ts';
+import { buildGitHubRepositoryApiUrl } from './repository.ts';
 
 const githubApiVersion = '2022-11-28';
 const installationTokenRefreshSkewMs = 60_000;
@@ -25,20 +26,6 @@ const installationTokenCache = new Map<string, CachedInstallationToken>();
 export const resetGitHubAuthCacheForTests = (): void => {
   installationIdCache.clear();
   installationTokenCache.clear();
-};
-
-const parseRepositoryFullName = (
-  repositoryFullName: string,
-): { owner: string; repo: string } => {
-  const [owner, repo] = repositoryFullName.split('/');
-
-  if (!owner || !repo) {
-    throw new Error(
-      `Repository name must be in owner/repo format: ${repositoryFullName}`,
-    );
-  }
-
-  return { owner, repo };
 };
 
 const normalizeGitHubAppPrivateKey = (privateKey: string): string =>
@@ -109,9 +96,8 @@ const resolveGitHubAppInstallationId = async (
     );
   }
 
-  const { owner, repo } = parseRepositoryFullName(repositoryFullName);
   const response = await fetch(
-    `https://api.github.com/repos/${owner}/${repo}/installation`,
+    buildGitHubRepositoryApiUrl(repositoryFullName, '/installation'),
     {
       headers: buildGitHubHeaders(
         buildGitHubAppJwt(config.githubAppId, config.githubAppPrivateKey),

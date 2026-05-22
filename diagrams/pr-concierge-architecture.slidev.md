@@ -18,13 +18,17 @@ fonts:
 ---
 layout: cover
 class: cover-slide
+zoom: 0.88
 ---
 
 <div class="hero-shell">
 <div class="eyebrow">Platform engineering challenge</div>
+<div class="hero-title-row">
+<img class="brand-mark" src="./assets/pr-concierge-check-icon.svg" alt="PR Concierge icon" />
 <h1 class="hero-title">PR Concierge</h1>
+</div>
 <p class="hero-subtitle">
-  A webhook-driven service that turns pull request activity into a fast, explainable risk signal — with an AWS footprint small enough to review in one sitting.
+  A webhook-driven service that turns pull request activity into a fast, explainable risk signal, stores the evaluation, and writes a branded PR check — with an AWS footprint small enough to review in one sitting.
 </p>
 
 <div class="chip-row">
@@ -49,9 +53,9 @@ class: cover-slide
 <p class="metric-copy">A clean event path for short-lived webhook work.</p>
 </div>
 <div class="surface-card metric-card">
-<div class="card-kicker">Persistence</div>
-<div class="metric-title">DynamoDB-backed evaluations</div>
-<p class="metric-copy">One durable record per evaluation without relational overhead.</p>
+<div class="card-kicker">Persistence + feedback</div>
+<div class="metric-title">DynamoDB record + PR check</div>
+<p class="metric-copy">Each evaluation leaves one durable record and one reviewer-visible check result.</p>
 </div>
 <div class="surface-card metric-card">
 <div class="card-kicker">Operations</div>
@@ -61,9 +65,6 @@ class: cover-slide
 </div>
 </div>
 
-<p class="source-note">
-  Source artifacts: <code>README.md</code>, <code>DECISIONS.md</code>, and <code>diagrams/pr-concierge-architecture.slidev.md</code>
-</p>
 </div>
 
 <!--
@@ -77,7 +78,7 @@ zoom: 0.9
 
 <h1>What the service does</h1>
 <p class="lead">
-  One inbound webhook becomes one fast platform signal: verify the request, inspect the pull request, score risk, and save a result that a human can act on.
+  One inbound webhook becomes one fast platform signal: verify the request, inspect the pull request, score risk, save the evaluation, and publish a PR check that a human can act on.
 </p>
 
 <div class="feature-grid">
@@ -101,8 +102,8 @@ zoom: 0.9
 
 <div class="surface-card feature-card">
 <div class="card-kicker">Persist</div>
-<h3>Store the evaluation and emit structured logs</h3>
-<p>The deployed runtime writes evaluation records and keeps the result observable from the first request.</p>
+<h3>Store the evaluation and update the PR check</h3>
+<p>The deployed runtime writes the DynamoDB record, emits structured logs, and finishes the branded <code>pr-concierge</code> check.</p>
 </div>
 </div>
 
@@ -122,7 +123,7 @@ zoom: 0.9
 </div>
 
 <!--
-This slide reframes the plain bullet list into a product-surface view. I would narrate it as a clean four-step contract: receive, verify, analyze, persist. The smaller cards at the bottom show scope discipline instead of trying to hide what the MVP intentionally does not do yet.
+This slide reframes the plain bullet list into a product-surface view. I would narrate it as a clean four-step contract: receive, verify, analyze, then persist and publish. The smaller cards at the bottom show scope discipline instead of trying to hide what the MVP intentionally does not do yet.
 -->
 
 ---
@@ -132,7 +133,7 @@ zoom: 0.88
 
 <h1>Architecture at a glance</h1>
 <p class="lead">
-  The runtime path stays short. Storage and operational telemetry branch cleanly from the Lambda handler instead of hiding inside later follow-up work.
+  The runtime path stays short. Reviewer feedback, storage, and operational telemetry branch cleanly from the Lambda handler instead of hiding inside later follow-up work.
 </p>
 
 ```mermaid {theme: 'dark', scale: 0.66}
@@ -141,6 +142,7 @@ flowchart LR
     APIGW["API Gateway<br/>HTTP API"]
   LAMBDA["Lambda + Hono<br/>validate<br/>fetch files<br/>score risk"]
   GHAPI["GitHub API<br/>PR files"]
+  CHECK["GitHub PR check<br/>status + branded details"]
   DDB[("DynamoDB<br/>eval records")]
   S3[("Optional S3<br/>archive")]
     LOGS["CloudWatch logs"]
@@ -149,6 +151,7 @@ flowchart LR
 
     GH --> APIGW --> LAMBDA
     LAMBDA --> GHAPI
+    LAMBDA --> CHECK
     LAMBDA --> DDB
     LAMBDA -. archive enabled .-> S3
     LAMBDA --> LOGS --> ALARMS --> SNS
@@ -174,7 +177,7 @@ zoom: 0.88
 <ol class="number-list">
 <li><span><strong>Receive and verify</strong>The request enters through <code>POST /webhooks/github</code>, and signature checking rejects bad inputs before deeper processing.</span></li>
 <li><span><strong>Fetch and classify</strong>The service reads changed files, applies deterministic rules, and derives a risk level.</span></li>
-<li><span><strong>Persist and respond</strong>The evaluation record and structured logs make the outcome visible immediately.</span></li>
+<li><span><strong>Persist, publish, and respond</strong>The service stores the evaluation, updates the <code>pr-concierge</code> check, and leaves structured logs behind for operators.</span></li>
 </ol>
 </div>
 
@@ -218,9 +221,9 @@ zoom: 0.9
 <p>The deployed stack watches Lambda errors and API Gateway 5xx signals.</p>
 </div>
 <div class="surface-card">
-<div class="card-kicker">Notifications</div>
-<h3>SNS fan-out</h3>
-<p>Operational noise has a single handoff point instead of hidden one-off integrations.</p>
+<div class="card-kicker">GitHub feedback</div>
+<h3>Reviewer-visible check runs</h3>
+<p>Each supported event creates or updates the <code>pr-concierge</code> check with status, summary, and branded details.</p>
 </div>
 <div class="surface-card">
 <div class="card-kicker">Verification</div>
@@ -241,7 +244,7 @@ zoom: 0.9
 </div>
 
 <!--
-This is the engineering-judgment slide. I would explain that the repo already proves logging, alarms, notifications, and verification paths, then use the deferred column to show that the scope stayed honest instead of drifting into a half-built platform.
+This is the engineering-judgment slide. I would explain that the repo already proves logging, alarms, GitHub feedback, and verification paths, then use the deferred column to show that the scope stayed honest instead of drifting into a half-built platform.
 -->
 
 ---
@@ -252,7 +255,7 @@ zoom: 0.92
 
 <h1>Key design decision</h1>
 <p class="lead">
-  API Gateway plus Lambda is the MVP shape because it keeps the product, deployment, and demo path aligned around one bursty request model.
+  API Gateway plus Lambda is the MVP shape because it keeps the product, deployment, and demo path aligned around one bursty request model that stores an evaluation and updates the PR in the same pass.
 </p>
 
 <div class="surface-card decision-highlight">
@@ -313,8 +316,8 @@ class: final-slide
 </div>
 <div class="surface-card demo-card">
 <div class="card-kicker">03</div>
-<h3>Saved evaluation</h3>
-<p>Inspect the resulting evaluation record and the deterministic summary.</p>
+<h3>Saved evaluation + PR check</h3>
+<p>Inspect the DynamoDB record and the branded <code>pr-concierge</code> check details on the pull request.</p>
 </div>
 <div class="surface-card demo-card">
 <div class="card-kicker">04</div>
@@ -323,7 +326,6 @@ class: final-slide
 </div>
 </div>
 
-<p class="final-note">Deck source: <code>diagrams/pr-concierge-architecture.slidev.md</code></p>
 </div>
 
 <!--

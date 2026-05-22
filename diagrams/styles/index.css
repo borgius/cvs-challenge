@@ -134,6 +134,26 @@
   margin: 0.85rem 0 0.7rem;
 }
 
+.hero-title-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin: 0.85rem 0 0.7rem;
+}
+
+.hero-title-row .hero-title {
+  margin: 0;
+}
+
+.brand-mark {
+  width: 5.2rem;
+  height: 5.2rem;
+  border-radius: 1.5rem;
+  box-shadow: 0 22px 44px rgba(2, 8, 23, 0.38);
+  flex: 0 0 auto;
+}
+
 .hero-title--compact {
   font-size: 3.1rem;
 }
@@ -268,7 +288,7 @@
 }
 
 .chip + .chip {
-  margin-left: 0.75rem;
+  margin-left: 0;
 }
 
 .chip-accent {
@@ -358,7 +378,97 @@
 }
 
 .cover-slide {
-  --uno: px-13 py-9 text-[0.98rem];
+  --uno: px-11 py-6.5 text-[0.95rem];
+}
+
+.cover-slide .hero-shell {
+  max-width: 64rem;
+}
+
+.cover-slide .eyebrow {
+  padding: 0.38rem 0.78rem;
+  font-size: 0.68rem;
+  letter-spacing: 0.19em;
+}
+
+.cover-slide .hero-title-row {
+  gap: 0.85rem;
+  margin: 0.65rem 0 0.45rem;
+}
+
+.cover-slide .hero-title {
+  font-size: 3.15rem;
+}
+
+.cover-slide .brand-mark {
+  width: 4.35rem;
+  height: 4.35rem;
+  border-radius: 1.15rem;
+}
+
+.cover-slide .hero-subtitle {
+  max-width: 50rem;
+  font-size: 0.98rem;
+  line-height: 1.4;
+  margin-bottom: 0.85rem;
+}
+
+.cover-slide .chip-row {
+  gap: 0.55rem;
+}
+
+.cover-slide .chip {
+  padding: 0.34rem 0.72rem;
+  font-size: 0.68rem;
+  letter-spacing: 0.11em;
+}
+
+.cover-slide .hero-grid {
+  grid-template-columns: minmax(0, 1.3fr) minmax(280px, 0.92fr);
+  gap: 0.75rem;
+  margin-top: 0.9rem;
+  align-items: start;
+}
+
+.cover-slide .metric-stack {
+  gap: 0.75rem;
+}
+
+.cover-slide .surface-card {
+  padding: 0.85rem 0.95rem;
+  border-radius: 22px;
+}
+
+.cover-slide .hero-summary h2 {
+  font-size: 1.2rem;
+  line-height: 1.08;
+  margin-bottom: 0.4rem;
+}
+
+.cover-slide .metric-card {
+  min-height: 0;
+}
+
+.cover-slide .card-kicker {
+  font-size: 0.68rem;
+  margin-bottom: 0.4rem;
+}
+
+.cover-slide .metric-title {
+  font-size: 0.94rem;
+  line-height: 1.26;
+}
+
+.cover-slide .hero-summary p,
+.cover-slide .metric-copy,
+.cover-slide .surface-card p,
+.cover-slide .source-note {
+  font-size: 0.88rem;
+  line-height: 1.4;
+}
+
+.cover-slide .source-note {
+  margin-top: 0.75rem;
 }
 
 .product-slide {
@@ -499,6 +609,12 @@
   .hero-title,
   .hero-title--compact {
     font-size: 3rem;
+  }
+
+  .brand-mark {
+    width: 4.25rem;
+    height: 4.25rem;
+    border-radius: 1.15rem;
   }
 
   .hero-grid,

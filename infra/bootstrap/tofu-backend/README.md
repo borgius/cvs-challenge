@@ -20,3 +20,16 @@ The wrapper script `scripts/bootstrap-tofu-backend.sh` will also try to import a
 ## Recommended path
 
 Use `scripts/bootstrap-tofu-backend.sh` from the repository root instead of invoking this directory directly unless you need a manual recovery flow.
+
+## Validation workflow
+
+Run `npm run validate:infra` from the repository root when you change this bootstrap root.
+
+That wrapper runs:
+
+- `tofu fmt -check -recursive` under `infra/`
+- `tofu init -backend=false -input=false`
+- `tofu validate`
+- `tofu test -filter=tests/root_validation_unit_test.tftest.hcl`
+
+The test file in `tests/` only exercises input validation, so it does not require AWS credentials or create live backend infrastructure.

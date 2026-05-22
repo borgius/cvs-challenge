@@ -4,6 +4,7 @@ dist/
 .artifacts/
 .env
 .terraform/
+.terraform.lock.hcl
 *.tfstate
 *.tfstate.*
 infra/terraform/env/*.auto.tfvars
