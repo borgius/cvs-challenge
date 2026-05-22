@@ -23,7 +23,7 @@ interface RecordedGitHubRequest {
 }
 
 const expectedCheckBrandingImageUrl =
-  'https://raw.githubusercontent.com/octo-org/pr-concierge/0123456789abcdef0123456789abcdef01234567/diagrams/assets/pr-concierge-check-icon.png';
+  'https://raw.githubusercontent.com/octo-org/pr-concierge/main/diagrams/assets/pr-concierge-check-icon.png';
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -122,6 +122,7 @@ const buildSuccessfulWebhookPayload = (
   const baseRepo = base.repo as Record<string, unknown>;
 
   repository.private = false;
+  repository.default_branch = 'main';
   headRepo.full_name = 'octo-org/pr-concierge';
   headRepo.name = 'pr-concierge';
   headRepo.private = false;

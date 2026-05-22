@@ -250,8 +250,8 @@ app.post('/webhooks/github', async (c) => {
     const checkBrandingImageUrl = payload.repository.private
       ? undefined
       : buildGitHubCheckBrandingImageUrl(
-          payload.pull_request.head.repo?.full_name ?? repositoryFullName,
-          headSha,
+          repositoryFullName,
+          payload.repository.default_branch ?? 'main',
         );
     let checkRunId: number | undefined;
     let githubChecksToken: string | undefined;
